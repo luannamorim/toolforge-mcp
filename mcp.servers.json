@@ -1,0 +1,10 @@
+{
+  "servers": [
+    {
+      "id": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/toolforge-demo"],
+      "env": {}
+    }
+  ]
+}
