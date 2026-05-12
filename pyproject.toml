@@ -22,6 +22,9 @@ dev = [
     "anyio>=4.0.0",
     "pytest-httpx>=0.30.0",
 ]
+eval = [
+    "inspect-ai>=0.3",
+]
 
 [build-system]
 requires = ["hatchling"]
