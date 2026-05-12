@@ -15,7 +15,10 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
 
     catalog: list[ToolDescriptor] = []
     for server_id in pool.connected_servers:
-        cached = cache.get(server_id)
+        # Composite key scopes the cache to the embedder's dimension space so
+        # swapping HashingEmbedder → Voyage/BGE (OQ#4) never mixes dimensions.
+        cache_key = f"{server_id}:{embedder.embedder_id}"
+        cached = cache.get(cache_key)
         if cached is None:
             tools = await pool.list_tools(server_id)
             # Embed tool descriptions at catalog-load time; stored in cache so
@@ -24,7 +27,7 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
                 t.model_copy(update={"description_embedding": embedder.embed(t.description)})
                 for t in tools
             ]
-            cache.set(server_id, ToolCatalog(tools=tools))
+            cache.set(cache_key, ToolCatalog(tools=tools))
             catalog.extend(tools)
         else:
             catalog.extend(cached.tools)

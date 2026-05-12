@@ -18,6 +18,8 @@ DIM = 128
 
 @runtime_checkable
 class Embedder(Protocol):
+    embedder_id: str
+
     def embed(self, text: str) -> list[float]: ...
 
 
@@ -31,6 +33,8 @@ class HashingEmbedder:
 
     Not for production use — accuracy depends entirely on word overlap.
     """
+
+    embedder_id = "hashing-v1"
 
     def __init__(self, dim: int = DIM) -> None:
         self._dim = dim

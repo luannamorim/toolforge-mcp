@@ -1,6 +1,9 @@
 """In-memory catalog cache with the same get/set/invalidate interface as a Redis-backed cache.
 
 Phase 1: in-process dict. Phase 2: swap implementation for Redis without touching callers.
+
+Key convention: callers pass "<server_id>:<embedder_id>" to scope entries per embedder
+so swapping HashingEmbedder → Voyage/BGE never mixes dimension spaces across a restart.
 """
 
 from __future__ import annotations
