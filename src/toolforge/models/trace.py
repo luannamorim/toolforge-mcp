@@ -23,4 +23,5 @@ class TraceRecord(BaseModel):
     selection_rule: str
     executed: bool = True
     error: str | None = None
+    alternatives: list[str] | None = None  # server_ids considered but not selected
     arguments: dict | None = None  # only when TRACE_VERBOSE=1

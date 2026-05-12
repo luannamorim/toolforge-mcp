@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
+from toolforge.agent.embedder import HashingEmbedder
 from toolforge.agent.orchestrator import Orchestrator
 from toolforge.config import Settings
 from toolforge.mcp_pool.catalog_cache import InMemoryCatalogCache
@@ -17,7 +18,7 @@ from toolforge.models.catalog import ToolDescriptor
 from toolforge.traces.writer import TraceWriter
 
 # ---------------------------------------------------------------------------
-# Catalog / MCP fixtures
+# Catalog fixtures — single server (Phase 1 path)
 # ---------------------------------------------------------------------------
 
 READ_FILE_TOOL = ToolDescriptor(
@@ -31,10 +32,65 @@ READ_FILE_TOOL = ToolDescriptor(
     server_id="filesystem",
 )
 
+# ---------------------------------------------------------------------------
+# Synthetic multi-server catalog (Phase 2 — selection heuristic tests)
+# Three overlapping servers: filesystem, github (same tool name), slack (unique).
+# ---------------------------------------------------------------------------
+
+FS_READ_TOOL = ToolDescriptor(
+    name="read_file",
+    description="Read a file from the local filesystem",
+    input_schema={
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+    },
+    server_id="filesystem",
+)
+
+GH_READ_TOOL = ToolDescriptor(
+    name="read_file",
+    description="Read a file from a GitHub repository",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "owner": {"type": "string"},
+            "repo": {"type": "string"},
+            "path": {"type": "string"},
+        },
+        "required": ["owner", "repo", "path"],
+    },
+    server_id="github",
+)
+
+SLACK_SEND_TOOL = ToolDescriptor(
+    name="send_message",
+    description="Send a message to a Slack channel",
+    input_schema={
+        "type": "object",
+        "properties": {"channel": {"type": "string"}, "text": {"type": "string"}},
+        "required": ["channel", "text"],
+    },
+    server_id="slack",
+)
+
+SYNTHETIC_PRIORITY = ["filesystem", "github", "slack"]
+
 
 @pytest.fixture
 def fake_catalog() -> list[ToolDescriptor]:
     return [READ_FILE_TOOL]
+
+
+@pytest.fixture
+def synthetic_catalog() -> list[ToolDescriptor]:
+    """Three-server catalog with deliberately overlapping tool names."""
+    return [FS_READ_TOOL, GH_READ_TOOL, SLACK_SEND_TOOL]
+
+
+@pytest.fixture
+def embedder() -> HashingEmbedder:
+    return HashingEmbedder()
 
 
 @pytest.fixture
@@ -136,7 +192,7 @@ def trace_writer(settings: Settings) -> TraceWriter:
 
 
 @pytest.fixture
-def test_app(fake_mcp_pool, settings, trace_writer, fake_catalog):
+def test_app(fake_mcp_pool, settings, trace_writer, fake_catalog, embedder):
     from toolforge.http import chat as chat_mod
     from toolforge.http import health as health_mod
 
@@ -144,18 +200,19 @@ def test_app(fake_mcp_pool, settings, trace_writer, fake_catalog):
     app.include_router(health_mod.router)
     app.include_router(chat_mod.router)
 
-    orchestrator = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    orchestrator = Orchestrator(fake_mcp_pool, trace_writer, settings, embedder=embedder)
 
     app.state.pool = fake_mcp_pool
     app.state.cache = InMemoryCatalogCache()
     app.state.writer = trace_writer
     app.state.orchestrator = orchestrator
+    app.state.embedder = embedder
     app.state.settings = settings
     return app
 
 
 @pytest.fixture
-def test_app_degraded(fake_mcp_pool_degraded, settings, trace_writer):
+def test_app_degraded(fake_mcp_pool_degraded, settings, trace_writer, embedder):
     from toolforge.http import chat as chat_mod
     from toolforge.http import health as health_mod
 
@@ -163,12 +220,13 @@ def test_app_degraded(fake_mcp_pool_degraded, settings, trace_writer):
     app.include_router(health_mod.router)
     app.include_router(chat_mod.router)
 
-    orchestrator = Orchestrator(fake_mcp_pool_degraded, trace_writer, settings)
+    orchestrator = Orchestrator(fake_mcp_pool_degraded, trace_writer, settings, embedder=embedder)
 
     app.state.pool = fake_mcp_pool_degraded
     app.state.cache = InMemoryCatalogCache()
     app.state.writer = trace_writer
     app.state.orchestrator = orchestrator
+    app.state.embedder = embedder
     app.state.settings = settings
     return app
 

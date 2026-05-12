@@ -13,6 +13,7 @@ class ToolDescriptor(BaseModel):
     description: str
     input_schema: dict
     server_id: str
+    description_embedding: list[float] | None = None
 
 
 class ToolCatalog(BaseModel):
