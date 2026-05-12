@@ -67,4 +67,12 @@ Slash commands `/review` and `/spec-check` are thin entrypoints that detect diff
 
 ## Build / lint / test
 
-No tooling exists yet. When `pyproject.toml`, a test runner, and CI are added, document the canonical commands here.
+```bash
+uv sync --extra dev          # install deps (first time or after pyproject.toml changes)
+uv run ruff check src tests  # lint
+uv run pytest -m "unit or integration"  # fast test suite (no live API/MCP)
+uv run pytest -m live        # opt-in: requires ANTHROPIC_API_KEY + MCP servers running
+uv run uvicorn toolforge.main:app --reload  # dev server (requires MCP servers + API key)
+```
+
+Trace output lands in `logs/traces.jsonl`. Set `TRACE_VERBOSE=1` to include raw arguments.
