@@ -1,0 +1,16 @@
+{
+  "servers": [
+    {
+      "id": "local",
+      "command": "uv",
+      "args": ["run", "python", "-m", "evals.stub_server", "--id", "local"],
+      "env": {}
+    },
+    {
+      "id": "cloud",
+      "command": "uv",
+      "args": ["run", "python", "-m", "evals.stub_server", "--id", "cloud"],
+      "env": {}
+    }
+  ]
+}
