@@ -315,3 +315,149 @@ async def test_orchestrator_heuristic_records_alternatives(fake_mcp_pool, settin
     assert record["server"] == "filesystem"
     assert record["selection_rule"] == "argument-type"
     assert record["alternatives"] == ["github"]
+
+
+# ---------------------------------------------------------------------------
+# Dry-run mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_chat_request_dry_run_defaults_false():
+    req = ChatRequest(message="hi")
+    assert req.dry_run is False
+
+
+@pytest.mark.unit
+def test_trace_record_dry_run_default_false():
+    record = TraceRecord(
+        session_id="s1", step=1, server="filesystem", tool="read_file",
+        arguments_hash="abc", latency_ms=1.0, success=True,
+        tokens_in=10, tokens_out=5, cost_usd=0.0001,
+        selection_rule="single-candidate",
+    )
+    data = record.model_dump()
+    assert data["dry_run"] is False
+
+    record2 = record.model_copy(update={"dry_run": True, "executed": False})
+    data2 = record2.model_dump()
+    assert data2["dry_run"] is True
+    assert data2["executed"] is False
+
+
+@pytest.mark.integration
+async def test_orchestrator_dry_run_skips_pool_call(fake_mcp_pool, settings, trace_writer, fake_catalog):
+    """dry_run=True: MCP never called; trace has executed=False, dry_run=True, success=True."""
+    import json
+
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(
+        orch._client.messages, "create",
+        new=AsyncMock(side_effect=[make_tool_use_response(), make_end_turn_response()]),
+    ):
+        resp = await orch.run(
+            ChatRequest(message="read a file", dry_run=True),
+            fake_catalog,
+        )
+
+    fake_mcp_pool.call_tool.assert_not_awaited()
+    assert resp.dry_run is True
+    assert resp.steps == 1
+
+    lines = settings.trace_sink.read_text().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["executed"] is False
+    assert record["dry_run"] is True
+    assert record["success"] is True
+
+
+@pytest.mark.integration
+async def test_orchestrator_dry_run_response_echoes_flag(fake_mcp_pool, settings, trace_writer):
+    """ChatResponse.dry_run echoes the request flag."""
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(
+        orch._client.messages, "create",
+        new=AsyncMock(return_value=make_end_turn_response()),
+    ):
+        resp = await orch.run(ChatRequest(message="hi", dry_run=True), [])
+
+    assert resp.dry_run is True
+
+
+@pytest.mark.integration
+async def test_orchestrator_dry_run_validation_failure_records_trace(
+    fake_mcp_pool, settings, trace_writer
+):
+    """Validation failure in dry-run: trace has success=False, executed=False, dry_run=True."""
+    import json
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
+
+    @dataclass
+    class _BadToolUseBlock:
+        type: str = "tool_use"
+        id: str = "toolu_bad"
+        name: str = "read_file"
+        input: dict = dc_field(default_factory=lambda: {"wrong_key": 42})
+
+    from tests.conftest import _Message
+
+    bad_response = _Message(stop_reason="tool_use", content=[_BadToolUseBlock()])
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(
+        orch._client.messages, "create",
+        new=AsyncMock(side_effect=[bad_response, make_end_turn_response()]),
+    ):
+        await orch.run(
+            ChatRequest(message="read something", dry_run=True),
+            [ToolDescriptor(
+                name="read_file", description="",
+                input_schema={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+                server_id="filesystem",
+            )],
+        )
+
+    fake_mcp_pool.call_tool.assert_not_awaited()
+    lines = settings.trace_sink.read_text().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["success"] is False
+    assert record["executed"] is False
+    assert record["dry_run"] is True
+    assert record["error"] is not None
+
+
+@pytest.mark.integration
+async def test_orchestrator_dry_run_multi_step(fake_mcp_pool, settings, trace_writer, fake_catalog):
+    """Two consecutive tool-use turns in dry_run: pool never called, two trace records."""
+    import json
+
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(
+        orch._client.messages, "create",
+        new=AsyncMock(side_effect=[
+            make_tool_use_response(),
+            make_tool_use_response(),
+            make_end_turn_response(),
+        ]),
+    ):
+        resp = await orch.run(
+            ChatRequest(message="read a file twice", dry_run=True),
+            fake_catalog,
+        )
+
+    fake_mcp_pool.call_tool.assert_not_awaited()
+    assert resp.steps == 2
+    lines = settings.trace_sink.read_text().splitlines()
+    assert len(lines) == 2
+    steps = [json.loads(line)["step"] for line in lines]
+    assert steps == [1, 2]
+    for line in lines:
+        record = json.loads(line)
+        assert record["dry_run"] is True
+        assert record["executed"] is False

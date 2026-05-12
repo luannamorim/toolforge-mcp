@@ -89,6 +89,7 @@ class Orchestrator:
                     response=text,
                     steps=step,
                     cost_usd=round(total_cost, 8),
+                    dry_run=request.dry_run,
                 )
 
             if response.stop_reason != "tool_use":
@@ -102,6 +103,7 @@ class Orchestrator:
                     response=text,
                     steps=step,
                     cost_usd=round(total_cost, 8),
+                    dry_run=request.dry_run,
                 )
 
             # Serialize assistant message back for context
@@ -158,6 +160,8 @@ class Orchestrator:
                             tokens_out=tokens_out,
                             cost_usd=cost_per_tool,
                             selection_rule=rule,
+                            executed=not request.dry_run,
+                            dry_run=request.dry_run,
                             alternatives=alternatives or None,
                             error=validation_err,
                             arguments=tool_args if self._settings.trace_verbose else None,
@@ -165,6 +169,37 @@ class Orchestrator:
                     )
                     tool_results.append(
                         _error_result(block.id, f"Validation error: {validation_err}")
+                    )
+                    continue
+
+                if request.dry_run:
+                    latency = (time.monotonic() - t0) * 1000
+                    self._writer.write(
+                        TraceRecord(
+                            session_id=session_id,
+                            step=step,
+                            server=server_id,
+                            tool=tool_name,
+                            arguments_hash=hash_arguments(tool_args),
+                            latency_ms=latency,
+                            success=True,
+                            tokens_in=tokens_in,
+                            tokens_out=tokens_out,
+                            cost_usd=cost_per_tool,
+                            selection_rule=rule,
+                            executed=False,
+                            dry_run=True,
+                            alternatives=alternatives or None,
+                            arguments=tool_args if self._settings.trace_verbose else None,
+                        )
+                    )
+                    synthetic = (
+                        f"[DRY RUN: {tool_name} on {server_id}"
+                        " would be invoked with the given arguments]"
+                    )
+                    sel_ctx.session_used_servers.append(server_id)
+                    tool_results.append(
+                        {"type": "tool_result", "tool_use_id": block.id, "content": synthetic}
                     )
                     continue
 
@@ -228,6 +263,7 @@ class Orchestrator:
             response="[max turns reached]",
             steps=step,
             cost_usd=round(total_cost, 8),
+            dry_run=request.dry_run,
         )
 
     def _build_system(self) -> list[dict]:
