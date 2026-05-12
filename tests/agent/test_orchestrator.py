@@ -203,6 +203,8 @@ async def test_orchestrator_happy_path(fake_mcp_pool, settings, trace_writer, fa
     assert record["success"] is True
     assert record["selection_rule"] == "single-candidate"
     assert record["executed"] is True
+    # Single-candidate path: alternatives list is empty → omitted from JSONL
+    assert "alternatives" not in record
     for field in ("timestamp", "session_id", "step", "arguments_hash",
                   "latency_ms", "tokens_in", "tokens_out", "cost_usd"):
         assert field in record, f"missing field: {field}"
@@ -282,3 +284,34 @@ async def test_orchestrator_session_id_echoed(fake_mcp_pool, settings, trace_wri
         resp = await orch.run(req, fake_catalog)
 
     assert resp.session_id == "my-session-42"
+
+
+@pytest.mark.integration
+async def test_orchestrator_heuristic_records_alternatives(fake_mcp_pool, settings, trace_writer):
+    """Two-candidate catalog: rule 2 picks filesystem; trace records github as alternative."""
+    import json
+
+    from tests.conftest import FS_READ_TOOL, GH_READ_TOOL, _Message, _ToolUseBlock
+
+    two_server_catalog = [FS_READ_TOOL, GH_READ_TOOL]
+    # Args {"path": "/tmp/x"} validate only filesystem schema (github requires owner+repo)
+    tool_block = _ToolUseBlock(name="read_file", input={"path": "/tmp/x"})
+    tool_response = _Message(stop_reason="tool_use", content=[tool_block])
+
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(
+        orch._client.messages, "create",
+        new=AsyncMock(side_effect=[tool_response, make_end_turn_response()]),
+    ):
+        resp = await orch.run(
+            ChatRequest(message="read a file"),
+            two_server_catalog,
+        )
+
+    assert resp.steps == 1
+    lines = settings.trace_sink.read_text().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["server"] == "filesystem"
+    assert record["selection_rule"] == "argument-type"
+    assert record["alternatives"] == ["github"]

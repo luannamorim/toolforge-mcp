@@ -7,6 +7,7 @@ from typing import Any
 import jsonschema
 from anthropic import AsyncAnthropic
 
+from toolforge.agent.embedder import Embedder, HashingEmbedder
 from toolforge.agent.selector import SelectionContext, select_server
 from toolforge.config import Settings
 from toolforge.mcp_pool.pool import MCPClientPool
@@ -28,12 +29,19 @@ class Orchestrator:
         pool: MCPClientPool,
         writer: TraceWriter,
         settings: Settings,
+        embedder: Embedder | None = None,
     ) -> None:
         self._pool = pool
         self._writer = writer
         self._settings = settings
+        self._embedder: Embedder = embedder if embedder is not None else HashingEmbedder()
+        self._priority_order = [s.id for s in settings.mcp_servers]
         self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
         self._system_text = load_system_prompt() + "\n\n" + load_tools_intro()
+
+    @property
+    def embedder(self) -> Embedder:
+        return self._embedder
 
     async def run(
         self,
@@ -49,7 +57,11 @@ class Orchestrator:
         messages: list[dict] = list(request.messages) + [
             {"role": "user", "content": request.message}
         ]
-        sel_ctx = SelectionContext(prompt=request.message)
+        sel_ctx = SelectionContext(
+            prompt=request.message,
+            priority_order=self._priority_order,
+            prompt_embedding=self._embedder.embed(request.message),
+        )
 
         for _ in range(MAX_TURNS):
             response = await self._client.messages.create(
@@ -120,7 +132,9 @@ class Orchestrator:
                     continue
 
                 try:
-                    selected, rule = select_server(tool_name, candidates, sel_ctx)
+                    selected, rule, alternatives = select_server(
+                        tool_name, candidates, sel_ctx, tool_input=tool_args
+                    )
                 except Exception as exc:
                     tool_results.append(_error_result(block.id, str(exc)))
                     continue
@@ -144,6 +158,7 @@ class Orchestrator:
                             tokens_out=tokens_out,
                             cost_usd=cost_per_tool,
                             selection_rule=rule,
+                            alternatives=alternatives or None,
                             error=validation_err,
                             arguments=tool_args if self._settings.trace_verbose else None,
                         )
@@ -172,6 +187,7 @@ class Orchestrator:
                             tokens_out=tokens_out,
                             cost_usd=cost_per_tool,
                             selection_rule=rule,
+                            alternatives=alternatives or None,
                             error=content_text if is_error else None,
                             arguments=tool_args if self._settings.trace_verbose else None,
                         )
@@ -198,6 +214,7 @@ class Orchestrator:
                             tokens_out=tokens_out,
                             cost_usd=cost_per_tool,
                             selection_rule=rule,
+                            alternatives=alternatives or None,
                             error=str(exc),
                             arguments=tool_args if self._settings.trace_verbose else None,
                         )

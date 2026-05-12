@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from toolforge.agent.embedder import HashingEmbedder
 from toolforge.agent.orchestrator import Orchestrator
 from toolforge.config import Settings
 from toolforge.http import chat, health
@@ -13,14 +14,16 @@ from toolforge.traces.writer import TraceWriter
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = Settings()
+    embedder = HashingEmbedder()
     pool = MCPClientPool(settings.mcp_servers)
     cache = InMemoryCatalogCache()
     writer = TraceWriter(settings.trace_sink, verbose=settings.trace_verbose)
-    orchestrator = Orchestrator(pool, writer, settings)
+    orchestrator = Orchestrator(pool, writer, settings, embedder=embedder)
 
     await pool.connect_all()
 
     app.state.settings = settings
+    app.state.embedder = embedder
     app.state.pool = pool
     app.state.cache = cache
     app.state.writer = writer
