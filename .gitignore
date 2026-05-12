@@ -148,9 +148,17 @@ activemq-data/
 *.sage.py
 
 # Environments
-.env
+.env*
 .envrc
 .venv
+
+# Sensitive credentials — never commit
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*
+secrets*
 env/
 venv/
 ENV/
@@ -216,3 +224,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code local overrides (per-developer, not committed)
+.claude/settings.local.json
