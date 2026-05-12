@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import AsyncExitStack
 from typing import Any
@@ -30,8 +31,9 @@ class MCPClientPool:
         return [sid for sid, ok in self._connected.items() if ok]
 
     async def connect_all(self) -> None:
-        for server_id, config in self._configs.items():
-            await self._connect(server_id, config)
+        await asyncio.gather(
+            *[self._connect(sid, cfg) for sid, cfg in self._configs.items()]
+        )
 
     async def _connect(self, server_id: str, config: MCPServerConfig) -> None:
         try:
@@ -39,7 +41,7 @@ class MCPClientPool:
             params = StdioServerParameters(
                 command=config.command,
                 args=config.args,
-                env=config.env if config.env else None,
+                env=config.resolved_env(),
             )
             read, write = await stack.enter_async_context(stdio_client(params))
             session = ClientSession(read, write)
