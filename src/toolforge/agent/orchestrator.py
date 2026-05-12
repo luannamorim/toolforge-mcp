@@ -57,6 +57,7 @@ class Orchestrator:
         messages: list[dict] = list(request.messages) + [
             {"role": "user", "content": request.message}
         ]
+        # prompt scoped to current message only; OQ#1 covers multi-turn tracking
         sel_ctx = SelectionContext(
             prompt=request.message,
             priority_order=self._priority_order,
@@ -118,6 +119,8 @@ class Orchestrator:
             messages.append({"role": "assistant", "content": assistant_content})
 
             tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+            # Evenly split the turn's cost across tool blocks; per-tool values
+            # undercount when blocks share a prefill hit, but sum correctly.
             cost_per_tool = turn_cost / max(len(tool_use_blocks), 1)
             tool_results = []
 
@@ -133,14 +136,9 @@ class Orchestrator:
                     )
                     continue
 
-                try:
-                    selected, rule, alternatives = select_server(
-                        tool_name, candidates, sel_ctx, tool_input=tool_args
-                    )
-                except Exception as exc:
-                    tool_results.append(_error_result(block.id, str(exc)))
-                    continue
-
+                selected, rule, alternatives = select_server(
+                    tool_name, candidates, sel_ctx, tool_input=tool_args
+                )
                 server_id = selected.server_id
                 validation_err = _validate_args(selected, tool_args)
 
@@ -197,7 +195,8 @@ class Orchestrator:
                         f"[DRY RUN: {tool_name} on {server_id}"
                         " would be invoked with the given arguments]"
                     )
-                    sel_ctx.session_used_servers.append(server_id)
+                    # Dry-run does NOT update session history — rule 3 must reflect
+                    # only real successful executions so the plan mirrors actual runs.
                     tool_results.append(
                         {"type": "tool_result", "tool_use_id": block.id, "content": synthetic}
                     )

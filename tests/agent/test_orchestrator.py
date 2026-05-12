@@ -461,3 +461,42 @@ async def test_orchestrator_dry_run_multi_step(fake_mcp_pool, settings, trace_wr
         record = json.loads(line)
         assert record["dry_run"] is True
         assert record["executed"] is False
+
+
+@pytest.mark.integration
+async def test_orchestrator_dry_run_no_session_pollution(fake_mcp_pool, settings, trace_writer):
+    """Dry-run does not add to session_used_servers, so rule 3 cannot fire on step 2."""
+    import json
+
+    from tests.conftest import FS_READ_TOOL, GH_READ_TOOL, _Message, _ToolUseBlock
+
+    # Two candidates, no explicit mention, open schemas → both validate → rule 2 ambiguous.
+    # Empty session → rule 3 falls through. No embeddings → rule 4 falls through.
+    # Rule 5 fires on both steps; session is NOT polluted between them.
+    open_fs = FS_READ_TOOL.model_copy(update={"input_schema": {"type": "object"}})
+    open_gh = GH_READ_TOOL.model_copy(update={"input_schema": {"type": "object"}})
+    two_catalog = [open_fs, open_gh]
+
+    tool_block = _ToolUseBlock(name="read_file", input={})
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(
+        orch._client.messages, "create",
+        new=AsyncMock(side_effect=[
+            _Message(stop_reason="tool_use", content=[tool_block]),
+            _Message(stop_reason="tool_use", content=[tool_block]),
+            make_end_turn_response(),
+        ]),
+    ):
+        resp = await orch.run(
+            ChatRequest(message="read twice", dry_run=True),
+            two_catalog,
+        )
+
+    assert resp.steps == 2
+    lines = settings.trace_sink.read_text().splitlines()
+    assert len(lines) == 2
+    for line in lines:
+        record = json.loads(line)
+        # Rule 3 (session-recency) must NOT have fired — dry-run doesn't accumulate history
+        assert record["selection_rule"] != "session-recency"
+        assert record["selection_rule"] == "priority-order"
