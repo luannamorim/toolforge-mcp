@@ -15,6 +15,7 @@ Rule strings (written to TraceRecord.selection_rule):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import jsonschema
@@ -74,8 +75,8 @@ def _rule_explicit_mention(
     ctx: SelectionContext,
 ) -> tuple[ToolDescriptor, str, list[str]] | None:
     """Rule 1: user explicitly names exactly one candidate server in the prompt."""
-    prompt_lower = ctx.prompt.lower()
-    matching = [c for c in candidates if c.server_id.lower() in prompt_lower]
+    prompt_tokens = set(re.findall(r"\b\w+\b", ctx.prompt.lower()))
+    matching = [c for c in candidates if c.server_id.lower() in prompt_tokens]
     if len(matching) != 1:
         return None
     selected = matching[0]
@@ -133,18 +134,14 @@ def _rule_cosine_similarity(
         for c in candidates
         if c.description_embedding is not None
     ]
-    if not scored:
+    # Require ≥2 scored candidates — one score is not a comparison.
+    if len(scored) < 2:
         return None
     scored.sort(key=lambda x: x[0], reverse=True)
     top_score, selected = scored[0]
-    if len(scored) >= 2 and top_score - scored[1][0] < ctx.cosine_margin:
+    if top_score - scored[1][0] < ctx.cosine_margin:
         return None  # too close to call
     alternatives = [c.server_id for _, c in scored[1:]]
-    # Include candidates with no embedding in alternatives
-    embedded_ids = {id(c) for _, c in scored}
-    for c in candidates:
-        if id(c) not in embedded_ids:
-            alternatives.append(c.server_id)
     return selected, "cosine-similarity", alternatives
 
 

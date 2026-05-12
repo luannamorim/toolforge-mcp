@@ -125,6 +125,24 @@ def test_rule1_ambiguous_both_mentioned_returns_none():
     ) is None
 
 
+@pytest.mark.unit
+def test_rule1_no_substring_false_positive():
+    # server_id "gh" must NOT match "ghost" via substring; whole-token check required
+    gh_tool = ToolDescriptor(
+        name="read_file", description="x",
+        input_schema={}, server_id="gh",
+    )
+    assert _rule_explicit_mention([gh_tool, FS_READ_TOOL], _ctx(prompt="my ghost story")) is None
+
+
+@pytest.mark.unit
+def test_rule1_whole_token_match():
+    # "github" appears as a whole word → matches server_id "github"
+    result = _rule_explicit_mention(READ_CANDIDATES, _ctx(prompt="check github please"))
+    assert result is not None
+    assert result[0].server_id == "github"
+
+
 # ---------------------------------------------------------------------------
 # Rule 2: argument-type match
 # ---------------------------------------------------------------------------
@@ -266,6 +284,15 @@ def test_rule4_no_description_embeddings_returns_none():
     # Candidates have no embeddings
     ctx = _ctx(prompt_embedding=[1.0, 0.0])
     assert _rule_cosine_similarity(READ_CANDIDATES, ctx) is None
+
+
+@pytest.mark.unit
+def test_rule4_single_embedding_falls_through():
+    # Only one of two candidates has an embedding — not a valid comparison; rule falls through.
+    ctx = _ctx(prompt_embedding=[1.0, 0.0, 0.0, 0.0])
+    fs = FS_READ_TOOL.model_copy(update={"description_embedding": [1.0, 0.0, 0.0, 0.0]})
+    # GH_READ_TOOL has no embedding (default None)
+    assert _rule_cosine_similarity([fs, GH_READ_TOOL], ctx) is None
 
 
 # ---------------------------------------------------------------------------
