@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_note": "Absolute accuracy floors per scorer. SPEC L131's relative >5pp gate is deferred until baseline-storage exists. p95 latency/cost gates are deferred until a traces summarizer ships.",
+  "_note": "Absolute accuracy floors per scorer. SPEC L131's relative >5pp gate is enforced via evals/baseline_metrics.json. p95 latency/cost gates are deferred until a traces summarizer ships.",
   "thresholds": {
     "selection_accuracy": {
       "scorer": "selection_match",

@@ -21,6 +21,20 @@ if str(_REPO_ROOT) not in sys.path:
 from scripts.check_eval_thresholds import main  # noqa: E402
 
 
+def _write_baseline(tmp_path: Path, tasks: dict[str, tuple[str, float]]) -> Path:
+    """Write a minimal baseline_metrics.json. tasks: {task_name: (scorer, baseline_accuracy)}."""
+    data = {
+        "version": 1,
+        "tasks": {
+            name: {"scorer": scorer, "baseline_accuracy": acc}
+            for name, (scorer, acc) in tasks.items()
+        },
+    }
+    p = tmp_path / "baseline_metrics.json"
+    p.write_text(json.dumps(data))
+    return p
+
+
 def _write_log(log_dir: Path, task: str, scorer: str, accuracy: float) -> None:
     """Write a minimal synthetic Inspect AI JSON log to log_dir."""
     data = {
@@ -89,3 +103,58 @@ def test_fail_when_log_missing(tmp_path: Path, capsys: pytest.CaptureFixture) ->
     assert main(str(log_dir), str(thresholds)) == 1
     captured = capsys.readouterr()
     assert "missing_task" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Baseline / relative gate tests
+# ---------------------------------------------------------------------------
+
+
+def test_baseline_pass_when_current_equals_baseline(tmp_path: Path) -> None:
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    _write_log(log_dir, task="my_task", scorer="selection_match", accuracy=0.85)
+    thresholds = _write_thresholds(tmp_path, task="my_task", scorer="selection_match", floor=0.50)
+    baseline = _write_baseline(tmp_path, {"my_task": ("selection_match", 0.85)})
+
+    assert main(str(log_dir), str(thresholds), str(baseline)) == 0
+
+
+def test_baseline_fail_when_drop_exceeds_5pp(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    _write_log(log_dir, task="my_task", scorer="selection_match", accuracy=0.72)
+    thresholds = _write_thresholds(tmp_path, task="my_task", scorer="selection_match", floor=0.50)
+    baseline = _write_baseline(tmp_path, {"my_task": ("selection_match", 0.85)})
+
+    assert main(str(log_dir), str(thresholds), str(baseline)) == 1
+    captured = capsys.readouterr()
+    assert "5pp gate" in captured.out
+    assert "my_task" in captured.err
+
+
+def test_baseline_pass_at_exact_5pp_boundary(tmp_path: Path) -> None:
+    # Strict ">5pp" means exactly 5pp is a pass
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    _write_log(log_dir, task="my_task", scorer="selection_match", accuracy=0.80)
+    thresholds = _write_thresholds(tmp_path, task="my_task", scorer="selection_match", floor=0.50)
+    baseline = _write_baseline(tmp_path, {"my_task": ("selection_match", 0.85)})
+
+    assert main(str(log_dir), str(thresholds), str(baseline)) == 0
+
+
+def test_baseline_warn_when_task_missing_from_baseline(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    _write_log(log_dir, task="my_task", scorer="selection_match", accuracy=0.85)
+    thresholds = _write_thresholds(tmp_path, task="my_task", scorer="selection_match", floor=0.50)
+    # baseline has no entry for my_task
+    baseline = _write_baseline(tmp_path, {})
+
+    assert main(str(log_dir), str(thresholds), str(baseline)) == 0
+    captured = capsys.readouterr()
+    assert "[WARN]" in captured.err
+    assert "my_task" in captured.err

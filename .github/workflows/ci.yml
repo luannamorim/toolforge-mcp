@@ -81,7 +81,7 @@ jobs:
 
       - name: Check thresholds
         if: env.ANTHROPIC_API_KEY != ''
-        run: uv run python scripts/check_eval_thresholds.py logs/eval evals/thresholds.json
+        run: uv run python scripts/check_eval_thresholds.py logs/eval evals/thresholds.json --baseline evals/baseline_metrics.json
 
       - name: Upload eval logs
         if: always() && env.ANTHROPIC_API_KEY != ''

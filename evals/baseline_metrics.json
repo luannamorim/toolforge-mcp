@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "_note": "Per-task baseline accuracy for SPEC L131 relative >5pp gate. Refreshed manually via scripts/update_baseline.py after a known-good main run, then committed. Values below are initial placeholders equal to the absolute floor — run all three evals on main and re-run update_baseline.py to capture a real baseline. retry_recovery_task is included for completeness; its n=3 corpus makes the >5pp gate effectively binary.",
+  "captured_at": "2026-05-13",
+  "captured_commit": "initial",
+  "tasks": {
+    "selection_accuracy": {
+      "scorer": "selection_match",
+      "baseline_accuracy": 0.5
+    },
+    "selection_heuristic": {
+      "scorer": "selection_match",
+      "baseline_accuracy": 0.5
+    },
+    "retry_recovery_task": {
+      "scorer": "retry_recovery",
+      "baseline_accuracy": 1.0
+    }
+  }
+}
