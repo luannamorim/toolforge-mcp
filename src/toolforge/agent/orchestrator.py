@@ -4,6 +4,7 @@ import asyncio
 import logging
 import random
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import jsonschema
@@ -49,6 +50,7 @@ class Orchestrator:
         self,
         request: ChatRequest,
         catalog: list[ToolDescriptor],
+        event_sink: Callable[[dict], Awaitable[None]] | None = None,
     ) -> ChatResponse:
         session_id = request.session_id
         step = 0
@@ -136,6 +138,7 @@ class Orchestrator:
                 self._dispatch_one_block(
                     block, s, session_id, sel_ctx, catalog,
                     tokens_in, tokens_out, cost_per_tool, request.dry_run,
+                    event_sink,
                 )
                 for block, s in zip(tool_use_blocks, block_steps)
             ])
@@ -171,6 +174,7 @@ class Orchestrator:
         tokens_out: int,
         cost_per_tool: float,
         dry_run: bool,
+        event_sink: Callable[[dict], Awaitable[None]] | None = None,
     ) -> tuple[dict, str | None]:
         """Validate, select, and execute one tool_use block.
 
@@ -179,6 +183,7 @@ class Orchestrator:
         """
         tool_name = block.name
         tool_args = dict(block.input)
+        args_hash = hash_arguments(tool_args)
 
         candidates = catalog_candidates(catalog, tool_name)
         if not candidates:
@@ -193,37 +198,38 @@ class Orchestrator:
         t0 = time.monotonic()
         if validation_err:
             latency = (time.monotonic() - t0) * 1000
-            self._writer.write(
+            await self._emit(
                 TraceRecord(
                     session_id=session_id,
                     step=step,
                     server=server_id,
                     tool=tool_name,
-                    arguments_hash=hash_arguments(tool_args),
+                    arguments_hash=args_hash,
                     latency_ms=latency,
                     success=False,
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                     cost_usd=cost_per_tool,
                     selection_rule=rule,
-                    executed=not dry_run,
+                    executed=False,
                     dry_run=dry_run,
                     alternatives=alternatives or None,
                     error=validation_err,
                     arguments=tool_args if self._settings.trace_verbose else None,
-                )
+                ),
+                event_sink,
             )
             return _error_result(block.id, f"Validation error: {validation_err}"), None
 
         if dry_run:
             latency = (time.monotonic() - t0) * 1000
-            self._writer.write(
+            await self._emit(
                 TraceRecord(
                     session_id=session_id,
                     step=step,
                     server=server_id,
                     tool=tool_name,
-                    arguments_hash=hash_arguments(tool_args),
+                    arguments_hash=args_hash,
                     latency_ms=latency,
                     success=True,
                     tokens_in=tokens_in,
@@ -234,7 +240,8 @@ class Orchestrator:
                     dry_run=True,
                     alternatives=alternatives or None,
                     arguments=tool_args if self._settings.trace_verbose else None,
-                )
+                ),
+                event_sink,
             )
             synthetic = (
                 f"[DRY RUN: {tool_name} on {server_id}"
@@ -274,13 +281,13 @@ class Orchestrator:
         retries = attempt_num - 1
 
         if last_exc is not None:
-            self._writer.write(
+            await self._emit(
                 TraceRecord(
                     session_id=session_id,
                     step=step,
                     server=server_id,
                     tool=tool_name,
-                    arguments_hash=hash_arguments(tool_args),
+                    arguments_hash=args_hash,
                     latency_ms=latency,
                     success=False,
                     tokens_in=tokens_in,
@@ -293,20 +300,21 @@ class Orchestrator:
                     alternatives=alternatives or None,
                     error=str(last_exc),
                     arguments=tool_args if self._settings.trace_verbose else None,
-                )
+                ),
+                event_sink,
             )
             return _error_result(block.id, str(last_exc)), None
 
         is_error = bool(getattr(mcp_result, "isError", False))
         content_text = _extract_content(mcp_result)
 
-        self._writer.write(
+        await self._emit(
             TraceRecord(
                 session_id=session_id,
                 step=step,
                 server=server_id,
                 tool=tool_name,
-                arguments_hash=hash_arguments(tool_args),
+                arguments_hash=args_hash,
                 latency_ms=latency,
                 success=not is_error,
                 tokens_in=tokens_in,
@@ -319,11 +327,21 @@ class Orchestrator:
                 alternatives=alternatives or None,
                 error=content_text if is_error else None,
                 arguments=tool_args if self._settings.trace_verbose else None,
-            )
+            ),
+            event_sink,
         )
         if is_error:
             return _error_result(block.id, content_text), None
         return {"type": "tool_result", "tool_use_id": block.id, "content": content_text}, server_id
+
+    async def _emit(
+        self,
+        record: TraceRecord,
+        event_sink: Callable[[dict], Awaitable[None]] | None,
+    ) -> None:
+        data = self._writer.write(record)
+        if event_sink is not None:
+            await event_sink({"event": "tool.result", "data": data})
 
     def _build_system(self) -> list[dict]:
         return [{"type": "text", "text": self._system_text, "cache_control": {"type": "ephemeral"}}]

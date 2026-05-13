@@ -53,9 +53,10 @@ class TraceWriter:
         self._verbose = verbose
         sink.parent.mkdir(parents=True, exist_ok=True)
 
-    def write(self, record: TraceRecord) -> None:
+    def write(self, record: TraceRecord) -> dict:
         data = record.model_dump(exclude_none=True)
         if not self._verbose:
             data.pop("arguments", None)
         with self._sink.open("a", encoding="utf-8") as f:
             f.write(json.dumps(data) + "\n")
+        return data

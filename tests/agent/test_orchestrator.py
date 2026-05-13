@@ -800,3 +800,51 @@ class TestParallelExecution:
         assert rec_b["success"] is True
         assert rec_b["retries"] == 0
         assert rec_b["attempt"] == 1
+
+
+# ---------------------------------------------------------------------------
+# event_sink parameter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_run_without_event_sink_unchanged(fake_mcp_pool, settings, trace_writer, fake_catalog):
+    """Omitting event_sink leaves existing /chat behaviour exactly as before."""
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(
+        orch._client.messages, "create",
+        new=AsyncMock(side_effect=[make_tool_use_response(), make_end_turn_response()]),
+    ):
+        resp = await orch.run(ChatRequest(message="read a file"), fake_catalog)
+
+    assert resp.steps == 1
+    assert resp.cost_usd >= 0
+    lines = settings.trace_sink.read_text().splitlines()
+    assert len(lines) == 1
+
+
+@pytest.mark.integration
+async def test_run_with_event_sink_emits_per_trace(fake_mcp_pool, settings, trace_writer, fake_catalog):
+    """event_sink receives one tool.result event per TraceRecord written."""
+    emitted: list[dict] = []
+
+    async def sink(event: dict) -> None:
+        emitted.append(event)
+
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(
+        orch._client.messages, "create",
+        new=AsyncMock(side_effect=[make_tool_use_response(), make_end_turn_response()]),
+    ):
+        await orch.run(ChatRequest(message="read a file"), fake_catalog, event_sink=sink)
+
+    lines = settings.trace_sink.read_text().splitlines()
+    assert len(emitted) == len(lines), "one SSE event per trace record"
+    assert all(e["event"] == "tool.result" for e in emitted)
+    trace_data = json.loads(lines[0])
+    sse_data = emitted[0]["data"]
+    assert sse_data["step"] == trace_data["step"]
+    assert sse_data["tool"] == trace_data["tool"]
+    assert sse_data["server"] == trace_data["server"]
+    assert sse_data["selection_rule"] == trace_data["selection_rule"]
+    assert sse_data["success"] == trace_data["success"]
