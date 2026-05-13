@@ -68,6 +68,8 @@ class Orchestrator:
             prompt_embedding=self._embedder.embed(request.message),
         )
 
+        assistant_text_buffer: list[str] = []
+
         for _ in range(MAX_TURNS):
             response = await self._client.messages.create(
                 model=MODEL,
@@ -85,7 +87,32 @@ class Orchestrator:
             turn_cost = compute_cost(MODEL, tokens_in, tokens_out, cache_read, cache_write)
             total_cost += turn_cost
 
+            for b in response.content:
+                if b.type == "text" and b.text:
+                    assistant_text_buffer.append(b.text)
+
+            if total_cost > self._settings.cost_ceiling_usd:
+                assistant_text_buffer.append(
+                    f"[TRUNCATED: cost ceiling ${self._settings.cost_ceiling_usd:.2f} reached]"
+                )
+                if event_sink is not None:
+                    await event_sink({
+                        "event": "halt",
+                        "data": {"reason": "cost_ceiling", "cost_usd": round(total_cost, 8)},
+                    })
+                return ChatResponse(
+                    session_id=session_id,
+                    response="\n\n".join(assistant_text_buffer),
+                    steps=step,
+                    cost_usd=round(total_cost, 8),
+                    dry_run=request.dry_run,
+                    halted=True,
+                    halt_reason="cost_ceiling",
+                )
+
             if response.stop_reason in ("end_turn", "max_tokens"):
+                # Use only this turn's text — buffer intentionally not used here,
+                # as it accumulates cross-turn text for the halt-with-partial path only.
                 text = next(
                     (b.text for b in response.content if b.type == "text"), ""
                 )

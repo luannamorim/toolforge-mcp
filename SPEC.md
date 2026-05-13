@@ -115,7 +115,7 @@ Target task: 3–5 tool calls, ~6k input tokens (mostly catalog, cached), ~1.5k 
 - Uncached system+catalog (~5k tokens): write cost ~$0.019 (paid once per cache window)
 - Per-task cached read (~5k tokens @ Sonnet cache read $0.30/Mtok): ~$0.0015
 - Per-task output (~1.5k @ $15/Mtok): ~$0.022
-- **Per-task total: ~$0.025**, p95 estimated at $0.04, ceiling $0.05 — meets envelope.
+- **Per-task total: ~$0.025**, p95 estimated at $0.04, hard ceiling $0.10 — meets envelope.
 
 At ~100 tasks/day: ~$2.50/day ≈ $75/month. Affordable as portfolio infra.
 

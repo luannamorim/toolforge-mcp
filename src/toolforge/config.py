@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     trace_sink: Path = Path("logs/traces.jsonl")
     mcp_servers_config: Path = Path("mcp.servers.json")
+    cost_ceiling_usd: float = 0.10
+    max_request_bytes: int = 32 * 1024
 
     @property
     def mcp_servers(self) -> list[MCPServerConfig]:

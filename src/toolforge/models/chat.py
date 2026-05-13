@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -16,3 +17,5 @@ class ChatResponse(BaseModel):
     steps: int
     cost_usd: float
     dry_run: bool = False
+    halted: bool = False
+    halt_reason: Literal["cost_ceiling"] | None = None

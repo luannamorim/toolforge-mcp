@@ -122,3 +122,82 @@ def test_error_event_on_unhandled_exception(test_app, client):
     assert len(error_events) == 1
     assert "boom" in error_events[0][1]["message"]
     assert not any(name == "final.response" for name, _ in events)
+
+
+@pytest.mark.integration
+def test_halt_event_emitted_before_final_response(test_app, client):
+    """When cost ceiling is breached, halt event precedes final.response in SSE stream."""
+    from toolforge.models.chat import ChatResponse
+
+    halted_response = ChatResponse(
+        session_id="halt-test",
+        response="Partial result\n\n[TRUNCATED: cost ceiling $0.10 reached]",
+        steps=0,
+        cost_usd=0.15,
+        halted=True,
+        halt_reason="cost_ceiling",
+    )
+
+    async def mock_run(request, catalog, event_sink=None):
+        if event_sink is not None:
+            await event_sink({"event": "halt", "data": {"reason": "cost_ceiling", "cost_usd": 0.15}})
+        return halted_response
+
+    with patch.object(test_app.state.orchestrator, "run", new=mock_run):
+        resp = client.post("/chat/stream", json={"message": "expensive task"})
+
+    events = _parse_sse(resp.content)
+    event_names = [name for name, _ in events]
+
+    assert "halt" in event_names
+    assert "final.response" in event_names
+    assert event_names.index("halt") < event_names.index("final.response")
+
+
+@pytest.mark.integration
+def test_halt_flag_in_final_response(test_app, client):
+    """final.response carries halted=True and halt_reason when ceiling is breached."""
+    from toolforge.models.chat import ChatResponse
+
+    halted_response = ChatResponse(
+        session_id="halt-test",
+        response="[TRUNCATED: cost ceiling $0.10 reached]",
+        steps=0,
+        cost_usd=0.15,
+        halted=True,
+        halt_reason="cost_ceiling",
+    )
+
+    async def mock_run(request, catalog, event_sink=None):
+        return halted_response
+
+    with patch.object(test_app.state.orchestrator, "run", new=mock_run):
+        resp = client.post("/chat/stream", json={"message": "expensive"})
+
+    events = _parse_sse(resp.content)
+    final = next((data for name, data in events if name == "final.response"), None)
+    assert final is not None
+    assert final["halted"] is True
+    assert final["halt_reason"] == "cost_ceiling"
+
+
+@pytest.mark.integration
+def test_credential_in_stream_rejected_with_400(client):
+    """POST /chat/stream with a credential-like message returns 400 before any streaming."""
+    resp = client.post(
+        "/chat/stream",
+        json={"message": "my token is ghp_abcdefghijklmnopqrstuvwxyz"},
+    )
+    assert resp.status_code == 400
+    assert "credential" in resp.json()["detail"]
+
+
+@pytest.mark.integration
+def test_credential_in_chat_rejected_with_400(client):
+    """POST /chat with a credential-like message returns 400."""
+    resp = client.post(
+        "/chat",
+        json={"message": "use AKIAIOSFODNN7EXAMPLE as the key"},
+    )
+    assert resp.status_code == 400
+    assert "credential" in resp.json()["detail"]
