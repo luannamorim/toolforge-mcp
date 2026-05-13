@@ -463,6 +463,121 @@ async def test_orchestrator_dry_run_multi_step(fake_mcp_pool, settings, trace_wr
         assert record["executed"] is False
 
 
+# ---------------------------------------------------------------------------
+# Retry policy (SPEC FR7)
+# ---------------------------------------------------------------------------
+
+
+class TestRetryPolicy:
+    """Four canonical retry paths — asyncio.sleep monkeypatched to a no-op."""
+
+    @pytest.mark.integration
+    async def test_transient_then_success(
+        self, fake_mcp_pool, settings, trace_writer, fake_catalog, monkeypatch
+    ):
+        """Two transient failures then success → retries=2, attempt=3, success=True."""
+        import json
+
+        monkeypatch.setattr("toolforge.agent.orchestrator.asyncio.sleep", AsyncMock())
+
+        content_block = fake_mcp_pool.call_tool.return_value
+        fake_mcp_pool.call_tool.side_effect = [
+            TimeoutError("timed out"),
+            ConnectionError("reset"),
+            content_block,
+        ]
+
+        orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+        with patch.object(
+            orch._client.messages, "create",
+            new=AsyncMock(side_effect=[make_tool_use_response(), make_end_turn_response()]),
+        ):
+            resp = await orch.run(ChatRequest(message="read a file"), fake_catalog)
+
+        assert resp.steps == 1
+        lines = settings.trace_sink.read_text().splitlines()
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["success"] is True
+        assert record["retries"] == 2
+        assert record["attempt"] == 3
+        assert record["retry_reason"] == "ConnectionError"  # last transient exc before success
+
+    @pytest.mark.integration
+    async def test_transient_exhausted(
+        self, fake_mcp_pool, settings, trace_writer, fake_catalog, monkeypatch
+    ):
+        """Three transient failures → retries=2, attempt=3, success=False."""
+        import json
+
+        monkeypatch.setattr("toolforge.agent.orchestrator.asyncio.sleep", AsyncMock())
+        fake_mcp_pool.call_tool.side_effect = [
+            ConnectionError("refused"),
+            ConnectionError("refused"),
+            ConnectionError("refused"),
+        ]
+
+        orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+        with patch.object(
+            orch._client.messages, "create",
+            new=AsyncMock(side_effect=[make_tool_use_response(), make_end_turn_response()]),
+        ):
+            await orch.run(ChatRequest(message="read a file"), fake_catalog)
+
+        lines = settings.trace_sink.read_text().splitlines()
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["success"] is False
+        assert record["retries"] == 2
+        assert record["attempt"] == 3
+        assert "refused" in record["error"]
+
+    @pytest.mark.integration
+    async def test_terminal_no_retry(
+        self, fake_mcp_pool, settings, trace_writer, fake_catalog, monkeypatch
+    ):
+        """Non-transient exception → pool called once, retries=0, attempt=1."""
+        import json
+
+        monkeypatch.setattr("toolforge.agent.orchestrator.asyncio.sleep", AsyncMock())
+        fake_mcp_pool.call_tool.side_effect = ValueError("bad schema")
+
+        orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+        with patch.object(
+            orch._client.messages, "create",
+            new=AsyncMock(side_effect=[make_tool_use_response(), make_end_turn_response()]),
+        ):
+            await orch.run(ChatRequest(message="read a file"), fake_catalog)
+
+        assert fake_mcp_pool.call_tool.call_count == 1
+        lines = settings.trace_sink.read_text().splitlines()
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["success"] is False
+        assert record["retries"] == 0
+        assert record["attempt"] == 1
+
+    @pytest.mark.integration
+    async def test_dry_run_skips_retry(
+        self, fake_mcp_pool, settings, trace_writer, fake_catalog, monkeypatch
+    ):
+        """dry_run=True — pool never called regardless of side_effect."""
+        monkeypatch.setattr("toolforge.agent.orchestrator.asyncio.sleep", AsyncMock())
+        fake_mcp_pool.call_tool.side_effect = ConnectionError("should never fire")
+
+        orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+        with patch.object(
+            orch._client.messages, "create",
+            new=AsyncMock(side_effect=[make_tool_use_response(), make_end_turn_response()]),
+        ):
+            resp = await orch.run(
+                ChatRequest(message="read a file", dry_run=True), fake_catalog
+            )
+
+        fake_mcp_pool.call_tool.assert_not_awaited()
+        assert resp.dry_run is True
+
+
 @pytest.mark.integration
 async def test_orchestrator_dry_run_no_session_pollution(fake_mcp_pool, settings, trace_writer):
     """Dry-run does not add to session_used_servers, so rule 3 cannot fire on step 2."""

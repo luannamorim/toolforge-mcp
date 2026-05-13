@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 import time
 from typing import Any
 
@@ -202,39 +204,36 @@ class Orchestrator:
                     )
                     continue
 
-                try:
-                    mcp_result = await self._pool.call_tool(server_id, tool_name, tool_args)
-                    latency = (time.monotonic() - t0) * 1000
-                    is_error = bool(getattr(mcp_result, "isError", False))
-                    content_text = _extract_content(mcp_result)
+                max_attempts = max(1, self._settings.retry_max_attempts)
+                base_delay = self._settings.retry_base_delay_ms / 1000.0
+                factor = self._settings.retry_backoff_factor
+                use_jitter = self._settings.retry_jitter
 
-                    self._writer.write(
-                        TraceRecord(
-                            session_id=session_id,
-                            step=step,
-                            server=server_id,
-                            tool=tool_name,
-                            arguments_hash=hash_arguments(tool_args),
-                            latency_ms=latency,
-                            success=not is_error,
-                            tokens_in=tokens_in,
-                            tokens_out=tokens_out,
-                            cost_usd=cost_per_tool,
-                            selection_rule=rule,
-                            alternatives=alternatives or None,
-                            error=content_text if is_error else None,
-                            arguments=tool_args if self._settings.trace_verbose else None,
-                        )
-                    )
-                    if is_error:
-                        tool_results.append(_error_result(block.id, content_text))
-                    else:
-                        sel_ctx.session_used_servers.append(server_id)
-                        tool_results.append(
-                            {"type": "tool_result", "tool_use_id": block.id, "content": content_text}
-                        )
-                except Exception as exc:
-                    latency = (time.monotonic() - t0) * 1000
+                mcp_result = None
+                last_exc: Exception | None = None
+                retry_reason: str | None = None
+
+                for attempt_num in range(1, max_attempts + 1):
+                    try:
+                        mcp_result = await self._pool.call_tool(server_id, tool_name, tool_args)
+                        last_exc = None
+                        break
+                    except Exception as exc:
+                        if _is_transient(exc) and attempt_num < max_attempts:
+                            retry_reason = type(exc).__name__
+                            last_exc = exc
+                            delay = base_delay * (factor ** (attempt_num - 1))
+                            if use_jitter:
+                                delay *= random.uniform(0.5, 1.0)
+                            await asyncio.sleep(delay)
+                        else:
+                            last_exc = exc
+                            break
+
+                latency = (time.monotonic() - t0) * 1000
+                retries = attempt_num - 1
+
+                if last_exc is not None:
                     self._writer.write(
                         TraceRecord(
                             session_id=session_id,
@@ -248,12 +247,48 @@ class Orchestrator:
                             tokens_out=tokens_out,
                             cost_usd=cost_per_tool,
                             selection_rule=rule,
+                            attempt=attempt_num,
+                            retries=retries,
+                            retry_reason=retry_reason,
                             alternatives=alternatives or None,
-                            error=str(exc),
+                            error=str(last_exc),
                             arguments=tool_args if self._settings.trace_verbose else None,
                         )
                     )
-                    tool_results.append(_error_result(block.id, str(exc)))
+                    tool_results.append(_error_result(block.id, str(last_exc)))
+                    continue
+
+                is_error = bool(getattr(mcp_result, "isError", False))
+                content_text = _extract_content(mcp_result)
+
+                self._writer.write(
+                    TraceRecord(
+                        session_id=session_id,
+                        step=step,
+                        server=server_id,
+                        tool=tool_name,
+                        arguments_hash=hash_arguments(tool_args),
+                        latency_ms=latency,
+                        success=not is_error,
+                        tokens_in=tokens_in,
+                        tokens_out=tokens_out,
+                        cost_usd=cost_per_tool,
+                        selection_rule=rule,
+                        attempt=attempt_num,
+                        retries=retries,
+                        retry_reason=retry_reason,
+                        alternatives=alternatives or None,
+                        error=content_text if is_error else None,
+                        arguments=tool_args if self._settings.trace_verbose else None,
+                    )
+                )
+                if is_error:
+                    tool_results.append(_error_result(block.id, content_text))
+                else:
+                    sel_ctx.session_used_servers.append(server_id)
+                    tool_results.append(
+                        {"type": "tool_result", "tool_use_id": block.id, "content": content_text}
+                    )
 
             messages.append({"role": "user", "content": tool_results})
 
@@ -286,6 +321,11 @@ class Orchestrator:
 
 def catalog_candidates(catalog: list[ToolDescriptor], tool_name: str) -> list[ToolDescriptor]:
     return [t for t in catalog if t.name == tool_name]
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """SPEC FR7: network/timeout/transport errors are retryable; everything else is terminal."""
+    return isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, BrokenPipeError, OSError))
 
 
 def _validate_args(tool: ToolDescriptor, args: dict) -> str | None:

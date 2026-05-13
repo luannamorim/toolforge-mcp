@@ -13,6 +13,10 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     trace_verbose: bool = False
+    retry_max_attempts: int = 3
+    retry_base_delay_ms: int = 500
+    retry_backoff_factor: float = 2.0
+    retry_jitter: bool = True
     redis_url: str = "redis://localhost:6379"
     trace_sink: Path = Path("logs/traces.jsonl")
     mcp_servers_config: Path = Path("mcp.servers.json")
