@@ -62,7 +62,6 @@ Slash commands `/review` and `/spec-check` are thin entrypoints that detect diff
 
 ## Available skills
 
-- **`/commit`** — produces atomic, Conventional-Commits-formatted commits grouped by logical scope. Use after finishing a change instead of ad-hoc `git commit`. Enforces subject format, body with *why*, and explicit file staging (never `git add -A`).
 - **`/mcp-builder`** — use this to scaffold the **supporting MCP servers** (own filesystem server; thin Slack server if Open Question #3 resolves to "build our own"). Do NOT use it for the ToolForge agent itself — ToolForge is an MCP client, not a server (see `SPEC.md § Non-Goals`).
 
 ## Build / lint / test

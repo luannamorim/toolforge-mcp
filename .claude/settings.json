@@ -1,16 +1,7 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 .claude/hooks/block_sensitive_stage.py"
-          }
-        ]
-      }
-    ]
+  "env": {
+    "TRACE_VERBOSE": "0",
+    "REDIS_URL": "redis://localhost:6379"
   },
   "permissions": {
     "allow": [
@@ -36,8 +27,20 @@
       "Bash(git reset --hard:*)"
     ]
   },
-  "env": {
-    "TRACE_VERBOSE": "0",
-    "REDIS_URL": "redis://localhost:6379"
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/block_sensitive_stage.py"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "commit-commands@claude-plugins-official": true
   }
 }
