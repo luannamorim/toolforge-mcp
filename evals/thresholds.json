@@ -1,21 +1,25 @@
 {
-  "version": 1,
-  "_note": "Absolute accuracy floors per scorer. SPEC L131's relative >5pp gate is enforced via evals/baseline_metrics.json. p95 latency/cost gates are deferred until a traces summarizer ships.",
+  "version": 2,
+  "_note": "Accuracy floors, relative >5pp gate (evals/baseline_metrics.json), and p95 latency/cost gates (SPEC L131). p95 values read from EvalSample.total_time + EvalSample.metadata.cost_usd in Inspect AI JSON logs.",
   "thresholds": {
     "selection_accuracy": {
       "scorer": "selection_match",
       "min_accuracy": 0.50,
-      "rationale": "Sanity floor. Corpus n=15 (<SPEC n=30); catches catastrophic regression without flapping on a small sample."
+      "p95_latency_ms_max": 8000,
+      "p95_cost_usd_max": 0.05,
+      "rationale": "Sanity floor. Corpus n=30 (SPEC n=30). p95 latency/cost gates per SPEC L131 (8s / $0.05)."
     },
     "selection_heuristic": {
       "scorer": "selection_match",
       "min_accuracy": 0.50,
-      "rationale": "Sanity floor. Corpus n=6; informational until corpus reaches n>=30 per SPEC L35."
+      "p95_latency_ms_max": 8000,
+      "p95_cost_usd_max": 0.05,
+      "rationale": "Sanity floor. Corpus n=30 (SPEC n=30). p95 latency/cost gates per SPEC L131 (8s / $0.05)."
     },
     "retry_recovery_task": {
       "scorer": "retry_recovery",
       "min_accuracy": 1.00,
-      "rationale": "Deterministic stub. n=3 covers each transient class in _is_transient (ConnectionError, TimeoutError, OSError); a regression removing any class flips one entry. STUB_FAIL_PER_CALL=2 forces the retry path on every distinct call."
+      "rationale": "Deterministic stub. n=3 covers each transient class in _is_transient (ConnectionError, TimeoutError, OSError); a regression removing any class flips one entry. STUB_FAIL_PER_CALL=2 forces the retry path on every distinct call. p95 cost/latency gate omitted: n=3 + retry-domain stub makes the SPEC L131 latency budget meaningless here."
     }
   }
 }
