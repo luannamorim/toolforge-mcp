@@ -1,0 +1,1 @@
+{"id": "retry-recovery-001", "input": "Search for files at the path /tmp/data", "expected_calls": [{"server": "local", "rule": "argument-type"}]}

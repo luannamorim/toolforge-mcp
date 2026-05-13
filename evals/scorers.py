@@ -107,3 +107,23 @@ def server_only():
 def rule_only():
     """Rule-only accuracy — isolates heuristic-ordering bugs from routing bugs."""
     return _make_scorer_fn(match_server=False, match_rule=True)
+
+
+@scorer(metrics=[accuracy(), stderr()])
+def retry_recovery():
+    """Retry-recovery scorer: passes if the final trace record has retries>=1 and success=True."""
+    async def score(state: TaskState, target: Target) -> Score:
+        meta = state.metadata or {}
+        trace_path = meta.get("trace_sink", "")
+        session_id = meta.get("session_id", "")
+        calls = _load_trace_calls(trace_path, session_id)
+        if not calls:
+            return Score(value=0.0, answer=None, explanation="no trace records emitted")
+        last = calls[-1]
+        recovered = last.get("success") is True and last.get("retries", 0) >= 1
+        explanation = (
+            f"retries={last.get('retries', 0)} attempt={last.get('attempt', 1)}"
+            f" success={last.get('success')}"
+        )
+        return Score(value=1.0 if recovered else 0.0, answer=None, explanation=explanation)
+    return score

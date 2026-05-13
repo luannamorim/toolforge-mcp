@@ -87,7 +87,7 @@ async def _get_pool_and_catalog(settings: Settings) -> tuple[MCPClientPool, list
         return pool, catalog
 
 
-def _make_solver(settings: Settings) -> Solver:
+def _make_solver(settings: Settings, dry_run: bool = True) -> Solver:
     """Return a Solver bound to the given settings (and its server config)."""
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         pool, catalog = await _get_pool_and_catalog(settings)
@@ -103,7 +103,7 @@ def _make_solver(settings: Settings) -> Solver:
         request = ChatRequest(
             message=state.input_text,
             session_id=sample_id,
-            dry_run=True,
+            dry_run=dry_run,
         )
         response = await orchestrator.run(request, catalog)
 
@@ -146,3 +146,18 @@ def stub_solver() -> Solver:
             --model anthropic/claude-sonnet-4-6
     """
     return _make_solver(Settings(mcp_servers_config=Path("mcp.servers.eval.json")))
+
+
+@solver
+def flaky_solver() -> Solver:
+    """Inspect AI Solver using the flaky stub config (STUB_FAIL_TIMES=2).
+
+    Exercises the retry policy (SPEC FR7): two transient ConnectionErrors
+    before the third attempt succeeds.  dry_run=False so the pool is actually
+    invoked and the retry loop fires.
+
+    CLI usage:
+        uv run inspect eval evals/retry_recovery.py \\
+            --model anthropic/claude-sonnet-4-6
+    """
+    return _make_solver(Settings(mcp_servers_config=Path("mcp.servers.flaky.json")), dry_run=False)

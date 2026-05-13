@@ -1,0 +1,10 @@
+{
+  "servers": [
+    {
+      "id": "local",
+      "command": "uv",
+      "args": ["run", "python", "-m", "evals.stub_server", "--id", "local"],
+      "env": {"STUB_FAIL_TIMES": "2"}
+    }
+  ]
+}

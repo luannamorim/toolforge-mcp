@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 
 import mcp.server.stdio
 import mcp.types as types
@@ -82,6 +83,10 @@ def build_server(server_id: str) -> Server:
     server = Server(f"stub-{server_id}")
     tool_list = _TOOLS[server_id]
 
+    # Failure-injection mode: raise ConnectionError for the first N calls.
+    # Controlled by STUB_FAIL_TIMES env var (default 0 = no failures).
+    _fail_remaining = [int(os.environ.get("STUB_FAIL_TIMES", "0"))]
+
     @server.list_tools()
     async def handle_list_tools() -> list[types.Tool]:
         return tool_list
@@ -90,6 +95,9 @@ def build_server(server_id: str) -> Server:
     async def handle_call_tool(
         name: str, arguments: dict | None
     ) -> list[types.TextContent]:
+        if _fail_remaining[0] > 0:
+            _fail_remaining[0] -= 1
+            raise ConnectionError("simulated transient failure")
         return [types.TextContent(type="text", text=f"[stub-{server_id}] {name} called")]
 
     return server
