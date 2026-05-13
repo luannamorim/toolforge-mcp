@@ -15,7 +15,7 @@
     "retry_recovery_task": {
       "scorer": "retry_recovery",
       "min_accuracy": 1.00,
-      "rationale": "Deterministic smoke (n=1). STUB_FAIL_TIMES=2 forces the retry path; any regression means broken retry plumbing."
+      "rationale": "Deterministic stub. n=3 covers each transient class in _is_transient (ConnectionError, TimeoutError, OSError); a regression removing any class flips one entry. STUB_FAIL_PER_CALL=2 forces the retry path on every distinct call."
     }
   }
 }

@@ -1,1 +1,3 @@
 {"id": "retry-recovery-001", "input": "Search for files at the path /tmp/data", "expected_calls": [{"server": "local", "rule": "argument-type"}]}
+{"id": "retry-recovery-002", "input": "Search for files at the path /var/log/syslog", "expected_calls": [{"server": "local", "rule": "argument-type"}]}
+{"id": "retry-recovery-003", "input": "Look up the term kubernetes in the documentation", "expected_calls": [{"server": "local", "rule": "priority-order"}]}

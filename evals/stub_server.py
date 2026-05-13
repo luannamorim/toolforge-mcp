@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 
 import mcp.server.stdio
@@ -79,13 +80,34 @@ _TOOLS: dict[str, list[types.Tool]] = {
 }
 
 
+_FAIL_PER_CALL = int(os.environ.get("STUB_FAIL_PER_CALL", "0"))
+_FAIL_TYPES_ENV = os.environ.get("STUB_FAIL_TYPES", "ConnectionError")
+_NAME_TO_EXC: dict[str, type[Exception]] = {
+    "ConnectionError": ConnectionError,
+    "TimeoutError": TimeoutError,
+    "asyncio.TimeoutError": asyncio.TimeoutError,
+    "OSError": OSError,
+    "BrokenPipeError": BrokenPipeError,
+}
+_FAIL_TYPES: list[type[Exception]] = []
+for _n in _FAIL_TYPES_ENV.split(","):
+    _n = _n.strip()
+    if _n in _NAME_TO_EXC:
+        _FAIL_TYPES.append(_NAME_TO_EXC[_n])
+    elif _n:
+        import sys
+        print(f"stub_server: unrecognised STUB_FAIL_TYPES entry {_n!r} — ignored", file=sys.stderr)
+
+
 def build_server(server_id: str) -> Server:
     server = Server(f"stub-{server_id}")
     tool_list = _TOOLS[server_id]
 
-    # Failure-injection mode: raise ConnectionError for the first N calls.
-    # Controlled by STUB_FAIL_TIMES env var (default 0 = no failures).
-    _fail_remaining = [int(os.environ.get("STUB_FAIL_TIMES", "0"))]
+    # Per-call failure injection: each distinct (name, arguments) gets its own
+    # budget of _FAIL_PER_CALL failures and a deterministic exception class
+    # assigned by insertion order (0th call type → ConnectionError, 1st →
+    # TimeoutError, etc. cycling through _FAIL_TYPES).
+    _args_state: dict[str, dict[str, int]] = {}
 
     @server.list_tools()
     async def handle_list_tools() -> list[types.Tool]:
@@ -95,9 +117,16 @@ def build_server(server_id: str) -> Server:
     async def handle_call_tool(
         name: str, arguments: dict | None
     ) -> list[types.TextContent]:
-        if _fail_remaining[0] > 0:
-            _fail_remaining[0] -= 1
-            raise ConnectionError("simulated transient failure")
+        if _FAIL_PER_CALL > 0 and _FAIL_TYPES:
+            key = f"{name}:{json.dumps(arguments or {}, sort_keys=True)}"
+            if key not in _args_state:
+                # len() before insert gives the stable insertion-order index for this call
+                _args_state[key] = {"remaining": _FAIL_PER_CALL, "type_idx": len(_args_state)}
+            state = _args_state[key]
+            if state["remaining"] > 0:
+                state["remaining"] -= 1
+                exc_cls = _FAIL_TYPES[state["type_idx"] % len(_FAIL_TYPES)]
+                raise exc_cls("simulated transient failure")
         return [types.TextContent(type="text", text=f"[stub-{server_id}] {name} called")]
 
     return server
