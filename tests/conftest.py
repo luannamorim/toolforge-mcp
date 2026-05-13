@@ -160,6 +160,17 @@ def make_tool_use_response() -> _Message:
     )
 
 
+def make_multi_tool_use_response(blocks: list[tuple[str, str, dict]]) -> _Message:
+    """Return a single-turn response containing multiple tool_use blocks.
+
+    blocks: list of (tool_use_id, tool_name, input_args).
+    """
+    return _Message(
+        stop_reason="tool_use",
+        content=[_ToolUseBlock(id=tid, name=name, input=inp) for tid, name, inp in blocks],
+    )
+
+
 def make_end_turn_response(text: str = "The file contains: Hello from the file!") -> _Message:
     return _Message(
         stop_reason="end_turn",

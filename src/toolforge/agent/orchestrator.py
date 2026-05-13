@@ -126,169 +126,29 @@ class Orchestrator:
             cost_per_tool = turn_cost / max(len(tool_use_blocks), 1)
             tool_results = []
 
-            for block in tool_use_blocks:
-                step += 1
-                tool_name = block.name
-                tool_args = dict(block.input)
+            # Pre-assign a unique step to each block before parallel dispatch
+            # so trace records carry deterministic step values regardless of
+            # completion order (the scorer sorts by step, not write order).
+            block_steps = range(step + 1, step + 1 + len(tool_use_blocks))
+            step += len(tool_use_blocks)
 
-                candidates = catalog_candidates(catalog, tool_name)
-                if not candidates:
-                    tool_results.append(
-                        _error_result(block.id, f"Unknown tool: {tool_name}")
-                    )
-                    continue
-
-                selected, rule, alternatives = select_server(
-                    tool_name, candidates, sel_ctx, tool_input=tool_args
+            block_outputs = await asyncio.gather(*[
+                self._dispatch_one_block(
+                    block, s, session_id, sel_ctx, catalog,
+                    tokens_in, tokens_out, cost_per_tool, request.dry_run,
                 )
-                server_id = selected.server_id
-                validation_err = _validate_args(selected, tool_args)
+                for block, s in zip(tool_use_blocks, block_steps)
+            ])
 
-                t0 = time.monotonic()
-                if validation_err:
-                    latency = (time.monotonic() - t0) * 1000
-                    self._writer.write(
-                        TraceRecord(
-                            session_id=session_id,
-                            step=step,
-                            server=server_id,
-                            tool=tool_name,
-                            arguments_hash=hash_arguments(tool_args),
-                            latency_ms=latency,
-                            success=False,
-                            tokens_in=tokens_in,
-                            tokens_out=tokens_out,
-                            cost_usd=cost_per_tool,
-                            selection_rule=rule,
-                            executed=not request.dry_run,
-                            dry_run=request.dry_run,
-                            alternatives=alternatives or None,
-                            error=validation_err,
-                            arguments=tool_args if self._settings.trace_verbose else None,
-                        )
-                    )
-                    tool_results.append(
-                        _error_result(block.id, f"Validation error: {validation_err}")
-                    )
-                    continue
-
-                if request.dry_run:
-                    latency = (time.monotonic() - t0) * 1000
-                    self._writer.write(
-                        TraceRecord(
-                            session_id=session_id,
-                            step=step,
-                            server=server_id,
-                            tool=tool_name,
-                            arguments_hash=hash_arguments(tool_args),
-                            latency_ms=latency,
-                            success=True,
-                            tokens_in=tokens_in,
-                            tokens_out=tokens_out,
-                            cost_usd=cost_per_tool,
-                            selection_rule=rule,
-                            executed=False,
-                            dry_run=True,
-                            alternatives=alternatives or None,
-                            arguments=tool_args if self._settings.trace_verbose else None,
-                        )
-                    )
-                    synthetic = (
-                        f"[DRY RUN: {tool_name} on {server_id}"
-                        " would be invoked with the given arguments]"
-                    )
-                    # Dry-run does NOT update session history — rule 3 must reflect
-                    # only real successful executions so the plan mirrors actual runs.
-                    tool_results.append(
-                        {"type": "tool_result", "tool_use_id": block.id, "content": synthetic}
-                    )
-                    continue
-
-                max_attempts = max(1, self._settings.retry_max_attempts)
-                base_delay = self._settings.retry_base_delay_ms / 1000.0
-                factor = self._settings.retry_backoff_factor
-                use_jitter = self._settings.retry_jitter
-
-                mcp_result = None
-                last_exc: Exception | None = None
-                retry_reason: str | None = None
-
-                for attempt_num in range(1, max_attempts + 1):
-                    try:
-                        mcp_result = await self._pool.call_tool(server_id, tool_name, tool_args)
-                        last_exc = None
-                        break
-                    except Exception as exc:
-                        if _is_transient(exc) and attempt_num < max_attempts:
-                            retry_reason = type(exc).__name__
-                            last_exc = exc
-                            delay = base_delay * (factor ** (attempt_num - 1))
-                            if use_jitter:
-                                delay *= random.uniform(0.5, 1.0)
-                            await asyncio.sleep(delay)
-                        else:
-                            last_exc = exc
-                            break
-
-                latency = (time.monotonic() - t0) * 1000
-                retries = attempt_num - 1
-
-                if last_exc is not None:
-                    self._writer.write(
-                        TraceRecord(
-                            session_id=session_id,
-                            step=step,
-                            server=server_id,
-                            tool=tool_name,
-                            arguments_hash=hash_arguments(tool_args),
-                            latency_ms=latency,
-                            success=False,
-                            tokens_in=tokens_in,
-                            tokens_out=tokens_out,
-                            cost_usd=cost_per_tool,
-                            selection_rule=rule,
-                            attempt=attempt_num,
-                            retries=retries,
-                            retry_reason=retry_reason,
-                            alternatives=alternatives or None,
-                            error=str(last_exc),
-                            arguments=tool_args if self._settings.trace_verbose else None,
-                        )
-                    )
-                    tool_results.append(_error_result(block.id, str(last_exc)))
-                    continue
-
-                is_error = bool(getattr(mcp_result, "isError", False))
-                content_text = _extract_content(mcp_result)
-
-                self._writer.write(
-                    TraceRecord(
-                        session_id=session_id,
-                        step=step,
-                        server=server_id,
-                        tool=tool_name,
-                        arguments_hash=hash_arguments(tool_args),
-                        latency_ms=latency,
-                        success=not is_error,
-                        tokens_in=tokens_in,
-                        tokens_out=tokens_out,
-                        cost_usd=cost_per_tool,
-                        selection_rule=rule,
-                        attempt=attempt_num,
-                        retries=retries,
-                        retry_reason=retry_reason,
-                        alternatives=alternatives or None,
-                        error=content_text if is_error else None,
-                        arguments=tool_args if self._settings.trace_verbose else None,
-                    )
-                )
-                if is_error:
-                    tool_results.append(_error_result(block.id, content_text))
-                else:
-                    sel_ctx.session_used_servers.append(server_id)
-                    tool_results.append(
-                        {"type": "tool_result", "tool_use_id": block.id, "content": content_text}
-                    )
+            # Append results and deferred recency updates in input order.
+            # Within-turn visibility of rule-3 is intentionally absent here
+            # (all selections ran before any block completed); the appends
+            # become visible starting from the next turn — SPEC FR5 / failure
+            # mode #5 accept this "parallel-anyway" trade-off.
+            for tool_result, used_server in block_outputs:
+                tool_results.append(tool_result)
+                if used_server is not None:
+                    sel_ctx.session_used_servers.append(used_server)
 
             messages.append({"role": "user", "content": tool_results})
 
@@ -299,6 +159,171 @@ class Orchestrator:
             cost_usd=round(total_cost, 8),
             dry_run=request.dry_run,
         )
+
+    async def _dispatch_one_block(
+        self,
+        block: Any,
+        step: int,
+        session_id: str,
+        sel_ctx: SelectionContext,
+        catalog: list[ToolDescriptor],
+        tokens_in: int,
+        tokens_out: int,
+        cost_per_tool: float,
+        dry_run: bool,
+    ) -> tuple[dict, str | None]:
+        """Validate, select, and execute one tool_use block.
+
+        Returns (tool_result_dict, used_server_id) where used_server_id is
+        None on any failure or dry-run path — only set on live success.
+        """
+        tool_name = block.name
+        tool_args = dict(block.input)
+
+        candidates = catalog_candidates(catalog, tool_name)
+        if not candidates:
+            return _error_result(block.id, f"Unknown tool: {tool_name}"), None
+
+        selected, rule, alternatives = select_server(
+            tool_name, candidates, sel_ctx, tool_input=tool_args
+        )
+        server_id = selected.server_id
+        validation_err = _validate_args(selected, tool_args)
+
+        t0 = time.monotonic()
+        if validation_err:
+            latency = (time.monotonic() - t0) * 1000
+            self._writer.write(
+                TraceRecord(
+                    session_id=session_id,
+                    step=step,
+                    server=server_id,
+                    tool=tool_name,
+                    arguments_hash=hash_arguments(tool_args),
+                    latency_ms=latency,
+                    success=False,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    cost_usd=cost_per_tool,
+                    selection_rule=rule,
+                    executed=not dry_run,
+                    dry_run=dry_run,
+                    alternatives=alternatives or None,
+                    error=validation_err,
+                    arguments=tool_args if self._settings.trace_verbose else None,
+                )
+            )
+            return _error_result(block.id, f"Validation error: {validation_err}"), None
+
+        if dry_run:
+            latency = (time.monotonic() - t0) * 1000
+            self._writer.write(
+                TraceRecord(
+                    session_id=session_id,
+                    step=step,
+                    server=server_id,
+                    tool=tool_name,
+                    arguments_hash=hash_arguments(tool_args),
+                    latency_ms=latency,
+                    success=True,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    cost_usd=cost_per_tool,
+                    selection_rule=rule,
+                    executed=False,
+                    dry_run=True,
+                    alternatives=alternatives or None,
+                    arguments=tool_args if self._settings.trace_verbose else None,
+                )
+            )
+            synthetic = (
+                f"[DRY RUN: {tool_name} on {server_id}"
+                " would be invoked with the given arguments]"
+            )
+            # Dry-run does NOT update session history — rule 3 must reflect
+            # only real successful executions so the plan mirrors actual runs.
+            return {"type": "tool_result", "tool_use_id": block.id, "content": synthetic}, None
+
+        max_attempts = max(1, self._settings.retry_max_attempts)
+        base_delay = self._settings.retry_base_delay_ms / 1000.0
+        factor = self._settings.retry_backoff_factor
+        use_jitter = self._settings.retry_jitter
+
+        mcp_result = None
+        last_exc: Exception | None = None
+        retry_reason: str | None = None
+
+        for attempt_num in range(1, max_attempts + 1):
+            try:
+                mcp_result = await self._pool.call_tool(server_id, tool_name, tool_args)
+                last_exc = None
+                break
+            except Exception as exc:
+                if _is_transient(exc) and attempt_num < max_attempts:
+                    retry_reason = type(exc).__name__
+                    last_exc = exc
+                    delay = base_delay * (factor ** (attempt_num - 1))
+                    if use_jitter:
+                        delay *= random.uniform(0.5, 1.0)
+                    await asyncio.sleep(delay)
+                else:
+                    last_exc = exc
+                    break
+
+        latency = (time.monotonic() - t0) * 1000
+        retries = attempt_num - 1
+
+        if last_exc is not None:
+            self._writer.write(
+                TraceRecord(
+                    session_id=session_id,
+                    step=step,
+                    server=server_id,
+                    tool=tool_name,
+                    arguments_hash=hash_arguments(tool_args),
+                    latency_ms=latency,
+                    success=False,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    cost_usd=cost_per_tool,
+                    selection_rule=rule,
+                    attempt=attempt_num,
+                    retries=retries,
+                    retry_reason=retry_reason,
+                    alternatives=alternatives or None,
+                    error=str(last_exc),
+                    arguments=tool_args if self._settings.trace_verbose else None,
+                )
+            )
+            return _error_result(block.id, str(last_exc)), None
+
+        is_error = bool(getattr(mcp_result, "isError", False))
+        content_text = _extract_content(mcp_result)
+
+        self._writer.write(
+            TraceRecord(
+                session_id=session_id,
+                step=step,
+                server=server_id,
+                tool=tool_name,
+                arguments_hash=hash_arguments(tool_args),
+                latency_ms=latency,
+                success=not is_error,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                cost_usd=cost_per_tool,
+                selection_rule=rule,
+                attempt=attempt_num,
+                retries=retries,
+                retry_reason=retry_reason,
+                alternatives=alternatives or None,
+                error=content_text if is_error else None,
+                arguments=tool_args if self._settings.trace_verbose else None,
+            )
+        )
+        if is_error:
+            return _error_result(block.id, content_text), None
+        return {"type": "tool_result", "tool_use_id": block.id, "content": content_text}, server_id
 
     def _build_system(self) -> list[dict]:
         return [{"type": "text", "text": self._system_text, "cache_control": {"type": "ephemeral"}}]

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tests.conftest import make_end_turn_response, make_tool_use_response
+from tests.conftest import (
+    make_end_turn_response,
+    make_multi_tool_use_response,
+    make_tool_use_response,
+)
 from toolforge.agent.orchestrator import Orchestrator, _validate_args
 from toolforge.models.catalog import ToolDescriptor
 from toolforge.models.chat import ChatRequest
@@ -615,3 +620,183 @@ async def test_orchestrator_dry_run_no_session_pollution(fake_mcp_pool, settings
         # Rule 3 (session-recency) must NOT have fired — dry-run doesn't accumulate history
         assert record["selection_rule"] != "session-recency"
         assert record["selection_rule"] == "priority-order"
+
+
+# ---------------------------------------------------------------------------
+# Parallel tool execution (SPEC FR5)
+# ---------------------------------------------------------------------------
+
+
+class TestParallelExecution:
+    """Tests for asyncio.gather-based parallel dispatch of tool_use blocks."""
+
+    @pytest.mark.unit
+    def test_make_multi_tool_use_response_helper(self):
+        resp = make_multi_tool_use_response([
+            ("id_a", "read_file", {"path": "/a"}),
+            ("id_b", "read_file", {"path": "/b"}),
+        ])
+        assert resp.stop_reason == "tool_use"
+        assert len(resp.content) == 2
+        assert resp.content[0].id == "id_a"
+        assert resp.content[0].input == {"path": "/a"}
+        assert resp.content[1].id == "id_b"
+        assert resp.content[1].input == {"path": "/b"}
+
+    @pytest.mark.integration
+    async def test_two_blocks_both_succeed(
+        self, fake_mcp_pool, settings, trace_writer, fake_catalog
+    ):
+        orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+        with patch.object(
+            orch._client.messages, "create",
+            new=AsyncMock(side_effect=[
+                make_multi_tool_use_response([
+                    ("id_a", "read_file", {"path": "/a"}),
+                    ("id_b", "read_file", {"path": "/b"}),
+                ]),
+                make_end_turn_response(),
+            ]),
+        ):
+            resp = await orch.run(ChatRequest(message="read two files"), fake_catalog)
+
+        assert resp.steps == 2
+        lines = settings.trace_sink.read_text().splitlines()
+        assert len(lines) == 2
+        records = sorted([json.loads(ln) for ln in lines], key=lambda r: r["step"])
+        assert records[0]["step"] == 1
+        assert records[1]["step"] == 2
+        assert all(r["success"] is True for r in records)
+
+        # Both tool_result entries must be in the messages sent to the LLM.
+        # Verify by checking that both tool_use_ids were ack'd.
+        assert fake_mcp_pool.call_tool.await_count == 2
+
+    @pytest.mark.integration
+    async def test_two_blocks_one_fails(
+        self, fake_mcp_pool, settings, trace_writer, fake_catalog
+    ):
+        """One terminal failure, one success — both trace records emitted."""
+        async def dispatch_side_effect(server_id, tool_name, tool_args):
+            if tool_args.get("path") == "/bad":
+                raise ValueError("access denied")
+            result = MagicMock()
+            result.isError = False
+            result.content = [MagicMock(text="ok")]
+            return result
+
+        fake_mcp_pool.call_tool.side_effect = dispatch_side_effect
+
+        orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+        with patch.object(
+            orch._client.messages, "create",
+            new=AsyncMock(side_effect=[
+                make_multi_tool_use_response([
+                    ("id_bad", "read_file", {"path": "/bad"}),
+                    ("id_ok", "read_file", {"path": "/ok"}),
+                ]),
+                make_end_turn_response(),
+            ]),
+        ):
+            await orch.run(ChatRequest(message="read two files"), fake_catalog)
+
+        lines = settings.trace_sink.read_text().splitlines()
+        assert len(lines) == 2
+        records = {json.loads(ln)["step"]: json.loads(ln) for ln in lines}
+        fail_rec = records[1]
+        ok_rec = records[2]
+        assert fail_rec["success"] is False
+        assert "access denied" in fail_rec["error"]
+        assert ok_rec["success"] is True
+
+    @pytest.mark.integration
+    async def test_recency_visibility_across_turns(
+        self, fake_mcp_pool, settings, trace_writer
+    ):
+        """Turn-1 parallel blocks don't see each other's server via rule-3;
+        turn-2 sees both because the deferred appends are visible by then."""
+        from tests.conftest import FS_READ_TOOL, GH_READ_TOOL
+
+        # Open schemas so both servers pass validation for any input
+        open_fs = FS_READ_TOOL.model_copy(update={"input_schema": {"type": "object"}})
+        open_gh = GH_READ_TOOL.model_copy(update={"input_schema": {"type": "object"}})
+        two_catalog = [open_fs, open_gh]
+
+        orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+        with patch.object(
+            orch._client.messages, "create",
+            new=AsyncMock(side_effect=[
+                make_multi_tool_use_response([
+                    ("id_1", "read_file", {}),
+                    ("id_2", "read_file", {}),
+                ]),
+                make_tool_use_response(),          # turn 2: single block
+                make_end_turn_response(),
+            ]),
+        ):
+            await orch.run(ChatRequest(message="read files"), two_catalog)
+
+        lines = settings.trace_sink.read_text().splitlines()
+        records = sorted([json.loads(ln) for ln in lines], key=lambda r: r["step"])
+
+        # Turn 1 blocks (steps 1, 2): no recency visible within the parallel turn
+        turn1 = records[:2]
+        for r in turn1:
+            assert r["selection_rule"] != "session-recency", (
+                f"step {r['step']}: within-turn recency should not fire"
+            )
+        # Turn 2 block (step 3): should see the two servers appended after turn 1
+        turn2 = records[2]
+        assert turn2["selection_rule"] == "session-recency", (
+            "turn 2 should fire rule-3 because turn-1 appends are now visible"
+        )
+
+    @pytest.mark.integration
+    async def test_parallel_independent_retries(
+        self, fake_mcp_pool, settings, trace_writer, fake_catalog, monkeypatch
+    ):
+        """Each block retries independently — A retries twice, B succeeds first try."""
+        monkeypatch.setattr("toolforge.agent.orchestrator.asyncio.sleep", AsyncMock())
+
+        success_result = MagicMock()
+        success_result.isError = False
+        success_result.content = [MagicMock(text="done")]
+
+        call_counts = {"a": 0, "b": 0}
+
+        async def per_block_side_effect(server_id, tool_name, tool_args):
+            if tool_args.get("path") == "/a":
+                call_counts["a"] += 1
+                if call_counts["a"] <= 2:
+                    raise ConnectionError("transient")
+                return success_result
+            else:
+                call_counts["b"] += 1
+                return success_result
+
+        fake_mcp_pool.call_tool.side_effect = per_block_side_effect
+
+        orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+        with patch.object(
+            orch._client.messages, "create",
+            new=AsyncMock(side_effect=[
+                make_multi_tool_use_response([
+                    ("id_a", "read_file", {"path": "/a"}),
+                    ("id_b", "read_file", {"path": "/b"}),
+                ]),
+                make_end_turn_response(),
+            ]),
+        ):
+            await orch.run(ChatRequest(message="read two files"), fake_catalog)
+
+        lines = settings.trace_sink.read_text().splitlines()
+        assert len(lines) == 2
+        records = {json.loads(ln)["step"]: json.loads(ln) for ln in lines}
+        rec_a = records[1]
+        rec_b = records[2]
+        assert rec_a["success"] is True
+        assert rec_a["retries"] == 2
+        assert rec_a["attempt"] == 3
+        assert rec_b["success"] is True
+        assert rec_b["retries"] == 0
+        assert rec_b["attempt"] == 1
