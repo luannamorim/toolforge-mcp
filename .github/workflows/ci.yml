@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - run: uv python install 3.11
+
+      - run: uv sync --extra dev
+
+      - name: Lint
+        run: uv run ruff check src tests evals scripts
+
+      - name: Unit + integration tests
+        run: uv run pytest -m "unit or integration" -v
+
+  evals:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if no API key
+        if: env.ANTHROPIC_API_KEY == ''
+        run: |
+          echo "::warning::ANTHROPIC_API_KEY secret not set — eval gating skipped."
+          exit 0
+
+      - uses: astral-sh/setup-uv@v6
+        if: env.ANTHROPIC_API_KEY != ''
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Install deps
+        if: env.ANTHROPIC_API_KEY != ''
+        run: uv sync --extra dev --extra eval
+
+      - name: Run selection_accuracy eval
+        if: env.ANTHROPIC_API_KEY != ''
+        run: |
+          uv run inspect eval evals/selection_accuracy.py \
+            --model anthropic/claude-sonnet-4-6 \
+            --log-dir logs/eval \
+            --log-format json
+
+      - name: Run selection_heuristic eval
+        if: env.ANTHROPIC_API_KEY != ''
+        run: |
+          uv run inspect eval evals/selection_heuristic.py \
+            --model anthropic/claude-sonnet-4-6 \
+            --log-dir logs/eval \
+            --log-format json
+
+      - name: Run retry_recovery eval
+        if: env.ANTHROPIC_API_KEY != ''
+        run: |
+          uv run inspect eval evals/retry_recovery.py \
+            --model anthropic/claude-sonnet-4-6 \
+            --log-dir logs/eval \
+            --log-format json
+
+      - name: Check thresholds
+        if: env.ANTHROPIC_API_KEY != ''
+        run: uv run python scripts/check_eval_thresholds.py logs/eval evals/thresholds.json
+
+      - name: Upload eval logs
+        if: always() && env.ANTHROPIC_API_KEY != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-logs
+          path: logs/eval/
