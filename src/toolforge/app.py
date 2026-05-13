@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from toolforge.agent.embedder import HashingEmbedder
 from toolforge.agent.orchestrator import Orchestrator
 from toolforge.config import Settings
-from toolforge.http import chat, health
+from toolforge.http import chat, health, tools
 from toolforge.mcp_pool.catalog_cache import InMemoryCatalogCache
 from toolforge.mcp_pool.pool import MCPClientPool
 from toolforge.traces.writer import TraceWriter
@@ -38,4 +38,5 @@ def create_app() -> FastAPI:
     app = FastAPI(title="ToolForge", version="0.1.0", lifespan=lifespan)
     app.include_router(health.router)
     app.include_router(chat.router)
+    app.include_router(tools.router)
     return app

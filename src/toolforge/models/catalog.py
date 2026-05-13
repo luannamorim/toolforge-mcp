@@ -32,6 +32,15 @@ class ToolDescriptor(BaseModel):
     description_embedding: list[float] | None = None
 
 
+class ToolSummary(BaseModel):
+    """Public-facing shape for /tools — ToolDescriptor without the internal embedding vector."""
+
+    name: str
+    description: str
+    input_schema: dict
+    server_id: str
+
+
 class ToolCatalog(BaseModel):
     tools: list[ToolDescriptor]
 
