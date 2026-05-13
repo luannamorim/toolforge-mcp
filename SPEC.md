@@ -195,7 +195,7 @@ External dependencies: Anthropic SDK, MCP Python SDK, FastAPI, Pydantic v2, Redi
 1. **Persistent conversation memory.** Should v1 ship a minimum memory backend (Redis-backed turn store keyed by `session_id`) or genuinely defer to v2? Default for now: stateless. Decision before tagging v1.
 2. **[RESOLVED 2026-05-12] GitHub MCP server choice.** Anthropic reference (`@modelcontextprotocol/server-github`) picked for parity with the filesystem launch pattern and SDK alignment; community fork reconsidered if benchmark gaps surface. Use Anthropic's reference `github-mcp-server` or the community `mcp-server-github`? Need to benchmark tool ergonomics and PR-creation reliability against the golden dataset.
 3. **Slack MCP server availability.** Is there a stable third-party Slack MCP server, or does this project need to ship a thin own-server as scaffolding? If so, mark it clearly in the README as supporting infrastructure, not the deliverable.
-4. **Embedding source for selection heuristic step 4.** Voyage hosted vs. local BGE — benchmark accuracy on the 30-task labeled set before locking.
+4. **Embedding source** — RESOLVED 2026-05-13: Voyage hosted `voyage-3-lite` via REST; `HashingEmbedder` retained as zero-key fallback. Revisit if rule-4 eval accuracy drops or if Voyage availability becomes a concern.
 5. **Cost-ceiling behavior.** When ceiling is hit mid-task, halt-with-partial (current spec) or one-shot finish with cheaper model? Current spec commits to halt; revisit after first eval pass.
 
 ## Differentiation (Portfolio Note)

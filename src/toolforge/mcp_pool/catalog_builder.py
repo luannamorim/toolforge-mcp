@@ -27,10 +27,23 @@ async def build_catalog(
         if cached is not None:
             return cached.tools
         tools = await pool.list_tools(server_id)
-        tools = [
-            t.model_copy(update={"description_embedding": embedder.embed(t.description)})
-            for t in tools
-        ]
+        batch_fn = getattr(embedder, "embed_batch_documents", None)
+        if batch_fn is not None:
+            descriptions = [t.description for t in tools]
+            vecs = await asyncio.to_thread(batch_fn, descriptions)
+            if len(vecs) != len(tools):
+                raise ValueError(
+                    f"embed_batch_documents returned {len(vecs)} vectors for {len(tools)} tools"
+                )
+            tools = [
+                t.model_copy(update={"description_embedding": v})
+                for t, v in zip(tools, vecs)
+            ]
+        else:
+            tools = [
+                t.model_copy(update={"description_embedding": embedder.embed(t.description)})
+                for t in tools
+            ]
         cache.set(cache_key, ToolCatalog(tools=tools))
         return tools
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -22,6 +23,8 @@ class Settings(BaseSettings):
     mcp_servers_config: Path = Path("mcp.servers.json")
     cost_ceiling_usd: float = 0.10
     max_request_bytes: int = 32 * 1024
+    voyage_api_key: str = ""
+    embedder_backend: Literal["voyage", "hashing"] = "voyage"
 
     @property
     def mcp_servers(self) -> list[MCPServerConfig]:

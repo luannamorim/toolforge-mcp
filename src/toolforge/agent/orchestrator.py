@@ -65,7 +65,7 @@ class Orchestrator:
         sel_ctx = SelectionContext(
             prompt=request.message,
             priority_order=self._priority_order,
-            prompt_embedding=self._embedder.embed(request.message),
+            prompt_embedding=await asyncio.to_thread(self._embedder.embed, request.message),
         )
 
         assistant_text_buffer: list[str] = []

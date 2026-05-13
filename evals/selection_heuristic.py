@@ -19,9 +19,9 @@ Limit to 2 samples for a quick smoke-test:
   rule 3  session-recency   — NOT testable: recency list only updates after
                                real successful calls (orchestrator.py:232);
                                dry_run=True never populates it.
-  rule 4  cosine-similarity — NOT testable: HashingEmbedder produces
-                               content-blind scores; margin gate rarely met.
-                               Becomes testable once OQ#4 resolves.
+  rule 4  cosine-similarity — tested: heur-cosine-* (requires EMBEDDER_BACKEND=voyage
+                               + VOYAGE_API_KEY at eval time; under HashingEmbedder
+                               these fall through to rule 5).
   rule 5  priority-order    — tested: heur-priority-*
 
 Acceptance threshold (SPEC L35): joint_accuracy >= 0.90 on n=30 corpus.
