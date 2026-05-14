@@ -25,6 +25,7 @@ class Embedder(Protocol):
     embedder_id: str
 
     def embed(self, text: str) -> list[float]: ...
+    def close(self) -> None: ...
 
 
 def _l2_normalize(vec: list[float]) -> list[float]:
@@ -56,6 +57,9 @@ class HashingEmbedder:
             bucket = int(hashlib.md5(token.encode()).hexdigest(), 16) % self._dim
             vec[bucket] += 1.0
         return _l2_normalize(vec)
+
+    def close(self) -> None:
+        pass
 
 
 _VOYAGE_DIM = 512  # voyage-3-lite default output dimension

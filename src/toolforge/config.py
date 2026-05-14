@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     retry_backoff_factor: float = 2.0
     retry_jitter: bool = True
     redis_url: str = "redis://localhost:6379"
+    catalog_cache_backend: Literal["redis", "memory"] = "redis"
     trace_sink: Path = Path("logs/traces.jsonl")
     mcp_servers_config: Path = Path("mcp.servers.json")
     cost_ceiling_usd: float = 0.10

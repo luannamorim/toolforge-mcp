@@ -8,7 +8,7 @@ from toolforge.agent.orchestrator import Orchestrator
 from toolforge.config import Settings
 from toolforge.guardrails.payload import PayloadSizeMiddleware
 from toolforge.http import chat, health, tools
-from toolforge.mcp_pool.catalog_cache import InMemoryCatalogCache
+from toolforge.mcp_pool.catalog_cache import CatalogCache, InMemoryCatalogCache, RedisCatalogCache
 from toolforge.mcp_pool.pool import MCPClientPool
 from toolforge.traces.writer import TraceWriter
 
@@ -29,11 +29,16 @@ def _build_embedder(settings: Settings) -> Embedder:
 def create_app() -> FastAPI:
     settings = Settings()
 
+    def _build_cache() -> CatalogCache:
+        if settings.catalog_cache_backend == "redis":
+            return RedisCatalogCache(settings.redis_url)
+        return InMemoryCatalogCache()
+
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
         embedder = _build_embedder(settings)
         pool = MCPClientPool(settings.mcp_servers)
-        cache = InMemoryCatalogCache()
+        cache = _build_cache()
         writer = TraceWriter(settings.trace_sink, verbose=settings.trace_verbose)
         orchestrator = Orchestrator(pool, writer, settings, embedder=embedder)
 
@@ -49,8 +54,8 @@ def create_app() -> FastAPI:
         yield
 
         await pool.disconnect_all()
-        if hasattr(embedder, "close"):
-            embedder.close()
+        await cache.close()
+        embedder.close()
 
     app = FastAPI(title="ToolForge", version="0.1.0", lifespan=_lifespan)
     # Must be registered before any middleware that reads the request body.
