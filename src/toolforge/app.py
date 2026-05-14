@@ -2,6 +2,9 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from opentelemetry import metrics as otel_metrics
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExportingMetricReader
 
 from toolforge.agent.embedder import Embedder, HashingEmbedder, VoyageEmbedder
 from toolforge.agent.orchestrator import Orchestrator
@@ -13,6 +16,20 @@ from toolforge.mcp_pool.pool import MCPClientPool
 from toolforge.traces.writer import TraceWriter
 
 logger = logging.getLogger(__name__)
+
+
+def _build_meter_provider(settings: Settings) -> MeterProvider:
+    if settings.otel_metrics_exporter == "stdout":
+        reader = PeriodicExportingMetricReader(
+            ConsoleMetricExporter(), export_interval_millis=60_000
+        )
+        return MeterProvider(metric_readers=[reader])
+    if settings.otel_metrics_exporter == "otlp":
+        raise RuntimeError(
+            "OTLP exporter dep not installed; "
+            "pip install opentelemetry-exporter-otlp and reconfigure"
+        )
+    return MeterProvider()
 
 
 def _build_embedder(settings: Settings) -> Embedder:
@@ -36,6 +53,9 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
+        meter_provider = _build_meter_provider(settings)
+        otel_metrics.set_meter_provider(meter_provider)
+
         embedder = _build_embedder(settings)
         pool = MCPClientPool(settings.mcp_servers)
         cache = _build_cache()
@@ -45,6 +65,7 @@ def create_app() -> FastAPI:
         await pool.connect_all()
 
         app.state.settings = settings
+        app.state.meter_provider = meter_provider
         app.state.embedder = embedder
         app.state.pool = pool
         app.state.cache = cache
@@ -56,6 +77,7 @@ def create_app() -> FastAPI:
         await pool.disconnect_all()
         await cache.close()
         embedder.close()
+        meter_provider.shutdown()
 
     app = FastAPI(title="ToolForge", version="0.1.0", lifespan=_lifespan)
     # Must be registered before any middleware that reads the request body.

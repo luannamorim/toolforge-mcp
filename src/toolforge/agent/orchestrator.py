@@ -18,6 +18,7 @@ from toolforge.mcp_pool.pool import MCPClientPool
 from toolforge.models.catalog import ToolDescriptor
 from toolforge.models.chat import ChatRequest, ChatResponse
 from toolforge.models.trace import TraceRecord
+from toolforge.observability.metrics import record_selection_rule, record_task, record_tool_error
 from toolforge.prompts import load_system_prompt, load_tools_intro
 from toolforge.traces.writer import TraceWriter, compute_cost, hash_arguments
 
@@ -56,6 +57,9 @@ class Orchestrator:
         session_id = request.session_id
         step = 0
         total_cost = 0.0
+        t_start = time.monotonic()
+        halted = False
+        halt_reason: str | None = None
 
         system_blocks = self._build_system()
         anthropic_tools = self._build_tools(catalog)
@@ -102,14 +106,22 @@ class Orchestrator:
                         "event": "halt",
                         "data": {"reason": "cost_ceiling", "cost_usd": round(total_cost, 8)},
                     })
+                halted = True
+                halt_reason = "cost_ceiling"
+                record_task(
+                    latency_ms=(time.monotonic() - t_start) * 1000,
+                    cost_usd=total_cost,
+                    halted=halted,
+                    halt_reason=halt_reason,
+                )
                 return ChatResponse(
                     session_id=session_id,
                     response="\n\n".join(assistant_text_buffer),
                     steps=step,
                     cost_usd=round(total_cost, 8),
                     dry_run=request.dry_run,
-                    halted=True,
-                    halt_reason="cost_ceiling",
+                    halted=halted,
+                    halt_reason=halt_reason,
                 )
 
             if response.stop_reason in ("end_turn", "max_tokens"):
@@ -117,6 +129,12 @@ class Orchestrator:
                 # as it accumulates cross-turn text for the halt-with-partial path only.
                 text = next(
                     (b.text for b in response.content if b.type == "text"), ""
+                )
+                record_task(
+                    latency_ms=(time.monotonic() - t_start) * 1000,
+                    cost_usd=total_cost,
+                    halted=halted,
+                    halt_reason=halt_reason,
                 )
                 return ChatResponse(
                     session_id=session_id,
@@ -131,6 +149,12 @@ class Orchestrator:
                 text = next(
                     (b.text for b in response.content if b.type == "text"),
                     f"[unexpected stop: {response.stop_reason}]",
+                )
+                record_task(
+                    latency_ms=(time.monotonic() - t_start) * 1000,
+                    cost_usd=total_cost,
+                    halted=halted,
+                    halt_reason=halt_reason,
                 )
                 return ChatResponse(
                     session_id=session_id,
@@ -184,6 +208,12 @@ class Orchestrator:
 
             messages.append({"role": "user", "content": tool_results})
 
+        record_task(
+            latency_ms=(time.monotonic() - t_start) * 1000,
+            cost_usd=total_cost,
+            halted=halted,
+            halt_reason=halt_reason,
+        )
         return ChatResponse(
             session_id=session_id,
             response="[max turns reached]",
@@ -217,12 +247,14 @@ class Orchestrator:
 
         candidates = catalog_candidates(catalog, tool_name)
         if not candidates:
+            record_tool_error(server="-", tool=tool_name, reason="unknown_tool")
             return _error_result(block.id, f"Unknown tool: {tool_name}"), None
 
         selected, rule, alternatives = select_server(
             tool_name, candidates, sel_ctx, tool_input=tool_args
         )
         server_id = selected.server_id
+        record_selection_rule(rule, server_id)
         validation_err = _validate_args(selected, tool_args)
 
         t0 = time.monotonic()
@@ -385,6 +417,14 @@ class Orchestrator:
         event_sink: Callable[[dict], Awaitable[None]] | None,
     ) -> None:
         data = self._writer.write(record)
+        if not record.success:
+            if not record.executed:
+                reason = "validation"
+            elif record.retry_reason is not None:
+                reason = "transport"
+            else:
+                reason = "tool_error"
+            record_tool_error(server=record.server, tool=record.tool, reason=reason)
         if event_sink is not None:
             await event_sink({"event": "tool.result", "data": data})
 

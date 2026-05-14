@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     max_request_bytes: int = 32 * 1024
     voyage_api_key: str = ""
     embedder_backend: Literal["voyage", "hashing"] = "voyage"
+    otel_metrics_exporter: Literal["stdout", "otlp", "none"] = "none"
 
     @property
     def mcp_servers(self) -> list[MCPServerConfig]:
