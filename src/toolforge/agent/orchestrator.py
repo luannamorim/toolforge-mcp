@@ -19,7 +19,7 @@ from toolforge.models.catalog import ToolDescriptor
 from toolforge.models.chat import ChatRequest, ChatResponse
 from toolforge.models.trace import TraceRecord
 from toolforge.observability.metrics import record_selection_rule, record_task, record_tool_error
-from toolforge.prompts import load_system_prompt, load_tools_intro
+from toolforge.prompts import load_examples, load_system_prompt, load_tools_intro
 from toolforge.traces.writer import TraceWriter, compute_cost, hash_arguments
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,11 @@ class Orchestrator:
             api_key=settings.anthropic_api_key,
             max_retries=settings.retry_max_attempts,
         )
-        self._system_text = load_system_prompt() + "\n\n" + load_tools_intro()
+        self._system_text = (
+            load_system_prompt()
+            + "\n\n" + load_tools_intro()
+            + "\n\n" + load_examples()
+        )
 
     @property
     def embedder(self) -> Embedder:
