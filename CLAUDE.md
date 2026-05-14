@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-This repository is **pre-implementation**. The only substantive file is `SPEC.md` at the root; there is no source tree, no `pyproject.toml`, no tests, and no build tooling yet. Treat `SPEC.md` as the source of truth for what the project is and how it must behave.
-
-When asked to "fix a bug" or "run the tests", verify the relevant code or tooling actually exists before proceeding — at this stage it usually does not, and the right move is to scaffold it according to `SPEC.md` rather than guess.
+This repository is **feature-complete for v1**. The source tree lives under
+`src/toolforge/`. Treat `SPEC.md` as the source of truth for behavior. Verify
+that something does not already exist in `src/toolforge/` before scaffolding it.
 
 ## Read `SPEC.md` before non-trivial work
 
@@ -40,14 +40,6 @@ Single Python process, three layers. The **HTTP layer** (FastAPI, stateless) acc
 
 CLI client, web UI, multi-tenant auth, persistent conversation memory across `/chat` calls, MCP-server lifecycle management, multi-model orchestration, distributed deployment. If a request implies one of these, flag it as out-of-scope per `SPEC.md` rather than implementing.
 
-## Open Questions blocking some implementation paths
-
-Three items in `SPEC.md § Open Questions` are still undecided and should be surfaced (not silently chosen) when relevant work starts:
-
-1. GitHub MCP server choice (Anthropic reference vs. community fork)
-2. Slack MCP server — third-party availability vs. ship a thin own-server as scaffolding
-3. Embedding source for selection heuristic step 4 (Voyage hosted vs. local BGE)
-
 ## Available subagents
 
 Three project subagents live under `.claude/agents/`. Main Claude should delegate proactively:
@@ -60,7 +52,7 @@ Slash commands `/review` and `/spec-check` are thin entrypoints that detect diff
 
 ## Available skills
 
-- **`/mcp-builder`** — use this to scaffold the **supporting MCP servers** (own filesystem server; thin Slack server if Open Question #3 resolves to "build our own"). Do NOT use it for the ToolForge agent itself — ToolForge is an MCP client, not a server (see `SPEC.md § Non-Goals`).
+- **`/mcp-builder`** — use this to scaffold any **supporting MCP servers** if v2 work explicitly requires a new MCP server not already present in `mcp.servers.json`. Do NOT use it for the ToolForge agent itself — ToolForge is an MCP client, not a server (see `SPEC.md § Non-Goals`).
 
 ## Build / lint / test
 
