@@ -192,7 +192,7 @@ External dependencies: Anthropic SDK, MCP Python SDK, FastAPI, Pydantic v2, Redi
 
 ## Open Questions
 
-1. **Persistent conversation memory.** Should v1 ship a minimum memory backend (Redis-backed turn store keyed by `session_id`) or genuinely defer to v2? Default for now: stateless. Decision before tagging v1.
+1. **[RESOLVED 2026-05-14] Persistent conversation memory.** v1 ships stateless. Callers MAY supply prior turns via `ChatRequest.messages` and the orchestrator concatenates them ahead of the current turn; `session_id` remains a per-request correlation token (written to every trace record, never read back). A Redis-backed turn store keyed by `session_id` is a candidate for v2. Revisit if (a) operators report painful client-side history management, or (b) selection rule 3 (`session-recency`) needs cross-request signal.
 2. **[RESOLVED 2026-05-12] GitHub MCP server choice.** Anthropic reference (`@modelcontextprotocol/server-github`) picked for parity with the filesystem launch pattern and SDK alignment; community fork reconsidered if benchmark gaps surface. Use Anthropic's reference `github-mcp-server` or the community `mcp-server-github`? Need to benchmark tool ergonomics and PR-creation reliability against the golden dataset.
 3. **Slack MCP server availability.** Is there a stable third-party Slack MCP server, or does this project need to ship a thin own-server as scaffolding? If so, mark it clearly in the README as supporting infrastructure, not the deliverable.
 4. **Embedding source** — RESOLVED 2026-05-13: Voyage hosted `voyage-3-lite` via REST; `HashingEmbedder` retained as zero-key fallback. Revisit if rule-4 eval accuracy drops or if Voyage availability becomes a concern.

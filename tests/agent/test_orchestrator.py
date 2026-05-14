@@ -384,6 +384,29 @@ async def test_orchestrator_session_id_echoed(fake_mcp_pool, settings, trace_wri
 
 
 @pytest.mark.integration
+async def test_orchestrator_includes_caller_supplied_history(
+    fake_mcp_pool, settings, trace_writer, fake_catalog
+):
+    """OQ#1 ratification: client-supplied prior turns flow into the LLM call."""
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    prior = [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi there"},
+    ]
+    mock_create = AsyncMock(return_value=make_end_turn_response())
+    with patch.object(orch._client.messages, "create", new=mock_create):
+        await orch.run(
+            ChatRequest(message="continue", messages=prior, dry_run=True),
+            fake_catalog,
+        )
+
+    sent_messages = mock_create.call_args_list[0].kwargs["messages"]
+    assert sent_messages[:2] == prior
+    assert sent_messages[2] == {"role": "user", "content": "continue"}
+    fake_mcp_pool.call_tool.assert_not_called()
+
+
+@pytest.mark.integration
 async def test_orchestrator_heuristic_records_alternatives(fake_mcp_pool, settings, trace_writer):
     """Two-candidate catalog: rule 2 picks filesystem; trace records github as alternative."""
     import json

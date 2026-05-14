@@ -42,13 +42,12 @@ CLI client, web UI, multi-tenant auth, persistent conversation memory across `/c
 
 ## Open Questions blocking some implementation paths
 
-Five items in `SPEC.md § Open Questions` are still undecided and should be surfaced (not silently chosen) when relevant work starts:
+Four items in `SPEC.md § Open Questions` are still undecided and should be surfaced (not silently chosen) when relevant work starts:
 
-1. Persistent conversation memory (stateless v1 vs. Redis-backed session store)
-2. GitHub MCP server choice (Anthropic reference vs. community fork)
-3. Slack MCP server — third-party availability vs. ship a thin own-server as scaffolding
-4. Embedding source for selection heuristic step 4 (Voyage hosted vs. local BGE)
-5. Cost-ceiling behavior on mid-task breach (halt-with-partial vs. Haiku finish)
+1. GitHub MCP server choice (Anthropic reference vs. community fork)
+2. Slack MCP server — third-party availability vs. ship a thin own-server as scaffolding
+3. Embedding source for selection heuristic step 4 (Voyage hosted vs. local BGE)
+4. Cost-ceiling behavior on mid-task breach (halt-with-partial vs. Haiku finish)
 
 ## Available subagents
 

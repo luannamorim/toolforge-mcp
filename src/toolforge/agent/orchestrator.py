@@ -73,7 +73,9 @@ class Orchestrator:
         messages: list[dict] = list(request.messages) + [
             {"role": "user", "content": request.message}
         ]
-        # prompt scoped to current message only; OQ#1 covers multi-turn tracking
+        # Selection prompt is the current user turn only; client-supplied prior
+        # turns in request.messages do not feed rule 3/4 scoring (v1 ratified
+        # stateless — see SPEC § Open Questions #1).
         sel_ctx = SelectionContext(
             prompt=request.message,
             priority_order=self._priority_order,
