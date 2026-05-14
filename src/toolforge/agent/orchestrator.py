@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -69,6 +70,7 @@ class Orchestrator:
         )
 
         assistant_text_buffer: list[str] = []
+        corrected_tools: set[str] = set()
 
         for _ in range(MAX_TURNS):
             response = await self._client.messages.create(
@@ -165,7 +167,7 @@ class Orchestrator:
                 self._dispatch_one_block(
                     block, s, session_id, sel_ctx, catalog,
                     tokens_in, tokens_out, cost_per_tool, request.dry_run,
-                    event_sink,
+                    corrected_tools, event_sink,
                 )
                 for block, s in zip(tool_use_blocks, block_steps)
             ])
@@ -201,6 +203,7 @@ class Orchestrator:
         tokens_out: int,
         cost_per_tool: float,
         dry_run: bool,
+        corrected_tools: set[str],
         event_sink: Callable[[dict], Awaitable[None]] | None = None,
     ) -> tuple[dict, str | None]:
         """Validate, select, and execute one tool_use block.
@@ -224,6 +227,20 @@ class Orchestrator:
 
         t0 = time.monotonic()
         if validation_err:
+            # First failure for this tool: emit corrective hint so the LLM can
+            # retry with the correct schema. Subsequent failures surface the
+            # error without further correction (SPEC § Output guardrails).
+            is_corrective = tool_name not in corrected_tools
+            if is_corrective:
+                corrected_tools.add(tool_name)
+                schema_hint = json.dumps(selected.input_schema, separators=(",", ":"))
+                error_msg = (
+                    f"Validation error: {validation_err}. "
+                    f"Expected schema: {schema_hint}. "
+                    f"Please retry with corrected arguments."
+                )
+            else:
+                error_msg = f"Validation error: {validation_err}"
             latency = (time.monotonic() - t0) * 1000
             await self._emit(
                 TraceRecord(
@@ -240,13 +257,14 @@ class Orchestrator:
                     selection_rule=rule,
                     executed=False,
                     dry_run=dry_run,
+                    corrective_retry=is_corrective,
                     alternatives=alternatives or None,
                     error=validation_err,
                     arguments=tool_args if self._settings.trace_verbose else None,
                 ),
                 event_sink,
             )
-            return _error_result(block.id, f"Validation error: {validation_err}"), None
+            return _error_result(block.id, error_msg), None
 
         if dry_run:
             latency = (time.monotonic() - t0) * 1000

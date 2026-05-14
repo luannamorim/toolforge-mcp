@@ -28,4 +28,5 @@ class TraceRecord(BaseModel):
     retry_reason: str | None = None
     error: str | None = None
     alternatives: list[str] | None = None  # server_ids considered but not selected
+    corrective_retry: bool = False
     arguments: dict | None = None  # only when TRACE_VERBOSE=1

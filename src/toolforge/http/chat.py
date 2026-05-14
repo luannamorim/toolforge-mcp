@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import StreamingResponse
 
 from toolforge.guardrails.credentials import scan_credentials
+from toolforge.guardrails.off_domain import _FIXED_DETAIL, classify_off_domain
 from toolforge.mcp_pool.catalog_builder import build_catalog
 from toolforge.models.chat import ChatRequest, ChatResponse
 
@@ -22,9 +23,15 @@ def _guard_credentials(message: str) -> None:
         raise HTTPException(status_code=400, detail="prompt contains credential-like pattern")
 
 
+def _guard_off_domain(message: str) -> None:
+    if classify_off_domain(message):
+        raise HTTPException(status_code=400, detail=_FIXED_DETAIL)
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, request: Request) -> ChatResponse:
     _guard_credentials(body.message)
+    _guard_off_domain(body.message)
     catalog = await build_catalog(
         request.app.state.pool,
         request.app.state.cache,
@@ -36,6 +43,7 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
 @router.post("/chat/stream")
 async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
     _guard_credentials(body.message)
+    _guard_off_domain(body.message)
     catalog = await build_catalog(
         request.app.state.pool,
         request.app.state.cache,

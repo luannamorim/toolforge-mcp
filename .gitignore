@@ -225,5 +225,8 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Eval artifacts (Inspect AI logs)
+logs/
+
 # Claude Code local overrides (per-developer, not committed)
 .claude/settings.local.json

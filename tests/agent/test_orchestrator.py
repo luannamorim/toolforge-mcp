@@ -278,6 +278,95 @@ async def test_orchestrator_validation_failure(fake_mcp_pool, settings, trace_wr
     assert record["error"] is not None
 
 
+_READ_FILE_SCHEMA = {
+    "type": "object",
+    "properties": {"path": {"type": "string"}},
+    "required": ["path"],
+}
+_READ_FILE_TOOL = ToolDescriptor(
+    name="read_file", description="", input_schema=_READ_FILE_SCHEMA, server_id="filesystem"
+)
+
+
+@pytest.mark.integration
+async def test_corrective_retry_first_failure_includes_schema(
+    fake_mcp_pool, settings, trace_writer
+):
+    """First validation failure returns a corrective message with schema and corrective_retry=True."""
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
+
+    from tests.conftest import _Message
+
+    @dataclass
+    class _BadBlock:
+        type: str = "tool_use"
+        id: str = "toolu_c1"
+        name: str = "read_file"
+        input: dict = dc_field(default_factory=lambda: {"wrong_key": 99})
+
+    bad_response = _Message(stop_reason="tool_use", content=[_BadBlock()])
+    end_response = make_end_turn_response("done")
+
+    mock_create = AsyncMock(side_effect=[bad_response, end_response])
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(orch._client.messages, "create", new=mock_create):
+        await orch.run(ChatRequest(message="read something"), [_READ_FILE_TOOL])
+
+    # The tool_result sent back to the LLM should contain the schema hint
+    second_call_messages = mock_create.call_args_list[1].kwargs["messages"]
+    last_user_msg = second_call_messages[-1]
+    assert last_user_msg["role"] == "user"
+    tool_result_content = last_user_msg["content"][0]
+    assert tool_result_content["is_error"] is True
+    assert "Expected schema" in tool_result_content["content"]
+    assert "Please retry" in tool_result_content["content"]
+
+    # Trace must have corrective_retry=True
+    record = json.loads(settings.trace_sink.read_text().splitlines()[0])
+    assert record["corrective_retry"] is True
+    assert record["success"] is False
+
+
+@pytest.mark.integration
+async def test_corrective_retry_second_failure_surfaces_plain_error(
+    fake_mcp_pool, settings, trace_writer
+):
+    """Second validation failure for the same tool emits a plain error (corrective_retry=False)."""
+    from dataclasses import dataclass
+    from dataclasses import field as dc_field
+
+    from tests.conftest import _Message
+
+    @dataclass
+    class _BadBlock:
+        type: str = "tool_use"
+        id: str = "toolu_c2"
+        name: str = "read_file"
+        input: dict = dc_field(default_factory=lambda: {"wrong_key": 99})
+
+    bad_response = _Message(stop_reason="tool_use", content=[_BadBlock()])
+    end_response = make_end_turn_response("giving up")
+
+    mock_create = AsyncMock(side_effect=[bad_response, bad_response, end_response])
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(orch._client.messages, "create", new=mock_create):
+        await orch.run(ChatRequest(message="read something"), [_READ_FILE_TOOL])
+
+    lines = settings.trace_sink.read_text().splitlines()
+    assert len(lines) == 2
+    first = json.loads(lines[0])
+    second = json.loads(lines[1])
+    assert first["corrective_retry"] is True   # first failure: corrective hint
+    assert second["corrective_retry"] is False  # second failure: plain error
+
+    # Second tool_result must NOT contain "Expected schema"
+    third_call_messages = mock_create.call_args_list[2].kwargs["messages"]
+    last_user_msg = third_call_messages[-1]
+    second_tool_result = last_user_msg["content"][0]
+    assert "Expected schema" not in second_tool_result["content"]
+
+
 @pytest.mark.integration
 async def test_orchestrator_session_id_echoed(fake_mcp_pool, settings, trace_writer, fake_catalog):
     orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
