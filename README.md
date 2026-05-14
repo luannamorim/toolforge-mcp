@@ -268,5 +268,6 @@ Eval tasks live in `evals/` and use [Inspect AI](https://inspect.ai/) (`uv sync 
 - Web UI / dashboard
 - Streaming token output beyond the optional SSE endpoint
 - Multi-model orchestration (e.g., Sonnet planner + Haiku executor)
+- Slack integration (no Slack MCP server in the reference configuration; deferred to v2)
 - Distributed deployment (multi-node, load balancing)
 - Recording / replay of MCP traffic for debugging

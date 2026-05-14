@@ -187,6 +187,7 @@ External dependencies: Anthropic SDK, MCP Python SDK, FastAPI, Pydantic v2, Redi
 - Web UI / dashboard
 - Streaming token output beyond the optional SSE endpoint
 - Multi-model orchestration (e.g., Sonnet planner + Haiku executor)
+- Slack integration (no Slack MCP server in the reference configuration; deferred to v2 — see Open Questions #3)
 - Distributed deployment (multi-node, load balancing)
 - Recording / replay of MCP traffic for debugging
 
@@ -194,7 +195,7 @@ External dependencies: Anthropic SDK, MCP Python SDK, FastAPI, Pydantic v2, Redi
 
 1. **[RESOLVED 2026-05-14] Persistent conversation memory.** v1 ships stateless. Callers MAY supply prior turns via `ChatRequest.messages` and the orchestrator concatenates them ahead of the current turn; `session_id` remains a per-request correlation token (written to every trace record, never read back). A Redis-backed turn store keyed by `session_id` is a candidate for v2. Revisit if (a) operators report painful client-side history management, or (b) selection rule 3 (`session-recency`) needs cross-request signal.
 2. **[RESOLVED 2026-05-12] GitHub MCP server choice.** Anthropic reference (`@modelcontextprotocol/server-github`) picked for parity with the filesystem launch pattern and SDK alignment; community fork reconsidered if benchmark gaps surface. Use Anthropic's reference `github-mcp-server` or the community `mcp-server-github`? Need to benchmark tool ergonomics and PR-creation reliability against the golden dataset.
-3. **Slack MCP server availability.** Is there a stable third-party Slack MCP server, or does this project need to ship a thin own-server as scaffolding? If so, mark it clearly in the README as supporting infrastructure, not the deliverable.
+3. **[RESOLVED 2026-05-14] Slack MCP server availability.** v1 ships without a Slack MCP server. The reference configuration (`mcp.servers.json`) declares `filesystem` + `github` only, satisfying FR1's "≥2 MCP servers, one filesystem + one third-party" requirement. A Slack integration — either via a stable third-party server or a thin own-server as supporting infrastructure — is a candidate for v2. Revisit if (a) a maintained third-party Slack MCP server reaches parity with the GitHub reference server's ergonomics, or (b) the canonical "edit → PR → notify" workflow is reprioritized over the current two-server scope.
 4. **Embedding source** — RESOLVED 2026-05-13: Voyage hosted `voyage-3-lite` via REST; `HashingEmbedder` retained as zero-key fallback. Revisit if rule-4 eval accuracy drops or if Voyage availability becomes a concern.
 5. **[RESOLVED 2026-05-14] Cost-ceiling behavior.** v1 halts with partial output. When the per-request cost ceiling is reached mid-task, the orchestrator returns immediately with `halted=True` and `halt_reason="cost_ceiling"`; no further LLM or MCP calls are made. A Haiku-finish fallback (complete the current step at lower cost) is a candidate for v2. Revisit if eval data shows halt-truncation materially degrades task success rate.
 
