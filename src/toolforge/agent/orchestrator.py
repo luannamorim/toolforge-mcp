@@ -12,7 +12,7 @@ import jsonschema
 from anthropic import AsyncAnthropic
 
 from toolforge.agent.embedder import Embedder, HashingEmbedder
-from toolforge.agent.selector import SelectionContext, select_server
+from toolforge.agent.selector import RULE_NO_CANDIDATE, SelectionContext, select_server
 from toolforge.config import Settings
 from toolforge.mcp_pool.pool import MCPClientPool
 from toolforge.models.catalog import ToolDescriptor
@@ -254,7 +254,27 @@ class Orchestrator:
 
         candidates = catalog_candidates(catalog, tool_name)
         if not candidates:
-            record_tool_error(server="-", tool=tool_name, reason="unknown_tool")
+            await self._emit(
+                TraceRecord(
+                    session_id=session_id,
+                    step=step,
+                    server="-",
+                    tool=tool_name,
+                    arguments_hash=args_hash,
+                    latency_ms=0.0,
+                    success=False,
+                    executed=False,
+                    dry_run=dry_run,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    cost_usd=cost_per_tool,
+                    selection_rule=RULE_NO_CANDIDATE,
+                    error=f"Unknown tool: {tool_name}",
+                    arguments=tool_args if self._settings.trace_verbose else None,
+                ),
+                event_sink,
+                metric_reason="unknown_tool",
+            )
             return _error_result(block.id, f"Unknown tool: {tool_name}"), None
 
         selected, rule, alternatives = select_server(
@@ -374,6 +394,7 @@ class Orchestrator:
                     arguments_hash=args_hash,
                     latency_ms=latency,
                     success=False,
+                    dry_run=dry_run,
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                     cost_usd=cost_per_tool,
@@ -401,6 +422,7 @@ class Orchestrator:
                 arguments_hash=args_hash,
                 latency_ms=latency,
                 success=not is_error,
+                dry_run=dry_run,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 cost_usd=cost_per_tool,
@@ -422,16 +444,18 @@ class Orchestrator:
         self,
         record: TraceRecord,
         event_sink: Callable[[dict], Awaitable[None]] | None,
+        metric_reason: str | None = None,
     ) -> None:
         data = self._writer.write(record)
         if not record.success:
-            if not record.executed:
-                reason = "validation"
-            elif record.retry_reason is not None:
-                reason = "transport"
-            else:
-                reason = "tool_error"
-            record_tool_error(server=record.server, tool=record.tool, reason=reason)
+            if metric_reason is None:
+                if not record.executed:
+                    metric_reason = "validation"
+                elif record.retry_reason is not None:
+                    metric_reason = "transport"
+                else:
+                    metric_reason = "tool_error"
+            record_tool_error(server=record.server, tool=record.tool, reason=metric_reason)
         if event_sink is not None:
             await event_sink({"event": "tool.result", "data": data})
 

@@ -23,6 +23,7 @@ import jsonschema
 from toolforge.models.catalog import ToolDescriptor
 
 COSINE_MARGIN_DEFAULT = 0.05
+RULE_NO_CANDIDATE = "no-candidate"
 
 
 @dataclass

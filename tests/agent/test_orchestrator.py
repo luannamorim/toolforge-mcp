@@ -9,11 +9,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tests.conftest import (
+    _Message,
+    _ToolUseBlock,
     make_end_turn_response,
     make_multi_tool_use_response,
     make_tool_use_response,
 )
 from toolforge.agent.orchestrator import Orchestrator, _validate_args
+from toolforge.agent.selector import RULE_NO_CANDIDATE
 from toolforge.models.catalog import ToolDescriptor
 from toolforge.models.chat import ChatRequest
 from toolforge.models.trace import SCHEMA_VERSION, TraceRecord
@@ -484,20 +487,10 @@ async def test_orchestrator_dry_run_validation_failure_records_trace(
     fake_mcp_pool, settings, trace_writer
 ):
     """Validation failure in dry-run: trace has success=False, executed=False, dry_run=True."""
-    import json
-    from dataclasses import dataclass
-    from dataclasses import field as dc_field
-
-    @dataclass
-    class _BadToolUseBlock:
-        type: str = "tool_use"
-        id: str = "toolu_bad"
-        name: str = "read_file"
-        input: dict = dc_field(default_factory=lambda: {"wrong_key": 42})
-
-    from tests.conftest import _Message
-
-    bad_response = _Message(stop_reason="tool_use", content=[_BadToolUseBlock()])
+    bad_response = _Message(
+        stop_reason="tool_use",
+        content=[_ToolUseBlock(id="toolu_bad", name="read_file", input={"wrong_key": 42})],
+    )
     orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
     with patch.object(
         orch._client.messages, "create",
@@ -524,6 +517,35 @@ async def test_orchestrator_dry_run_validation_failure_records_trace(
     assert record["executed"] is False
     assert record["dry_run"] is True
     assert record["error"] is not None
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("dry_run", [True, False])
+async def test_orchestrator_unknown_tool_emits_trace(fake_mcp_pool, settings, trace_writer, fake_catalog, dry_run):
+    """LLM emits a tool name not in the catalog: trace record emitted with dry_run propagated."""
+    ghost_response = _Message(
+        stop_reason="tool_use",
+        content=[_ToolUseBlock(id="toolu_ghost", name="ghost_tool", input={})],
+    )
+    orch = Orchestrator(fake_mcp_pool, trace_writer, settings)
+    with patch.object(
+        orch._client.messages, "create",
+        new=AsyncMock(side_effect=[ghost_response, make_end_turn_response()]),
+    ):
+        await orch.run(
+            ChatRequest(message="call ghost_tool", dry_run=dry_run),
+            fake_catalog,
+        )
+
+    lines = settings.trace_sink.read_text().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["success"] is False
+    assert record["executed"] is False
+    assert record["dry_run"] is dry_run
+    assert record["server"] == "-"
+    assert record["selection_rule"] == RULE_NO_CANDIDATE
+    assert record["error"].startswith("Unknown tool:")
 
 
 @pytest.mark.integration
