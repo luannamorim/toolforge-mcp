@@ -41,7 +41,10 @@ class Orchestrator:
         self._settings = settings
         self._embedder: Embedder = embedder if embedder is not None else HashingEmbedder()
         self._priority_order = [s.id for s in settings.mcp_servers]
-        self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._client = AsyncAnthropic(
+            api_key=settings.anthropic_api_key,
+            max_retries=settings.retry_max_attempts,
+        )
         self._system_text = load_system_prompt() + "\n\n" + load_tools_intro()
 
     @property

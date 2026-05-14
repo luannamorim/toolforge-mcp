@@ -13,6 +13,7 @@ from starlette.testclient import TestClient
 from toolforge.agent.embedder import HashingEmbedder
 from toolforge.agent.orchestrator import Orchestrator
 from toolforge.config import Settings
+from toolforge.http._errors import register_rate_limit_handler
 from toolforge.mcp_pool.catalog_cache import InMemoryCatalogCache
 from toolforge.models.catalog import ToolDescriptor
 from toolforge.traces.writer import TraceWriter
@@ -214,6 +215,7 @@ def test_app(fake_mcp_pool, settings, trace_writer, fake_catalog, embedder):
     app.include_router(health_mod.router)
     app.include_router(chat_mod.router)
     app.include_router(tools_mod.router)
+    register_rate_limit_handler(app)
 
     orchestrator = Orchestrator(fake_mcp_pool, trace_writer, settings, embedder=embedder)
 
@@ -236,6 +238,7 @@ def test_app_degraded(fake_mcp_pool_degraded, settings, trace_writer, embedder):
     app.include_router(health_mod.router)
     app.include_router(chat_mod.router)
     app.include_router(tools_mod.router)
+    register_rate_limit_handler(app)
 
     orchestrator = Orchestrator(fake_mcp_pool_degraded, trace_writer, settings, embedder=embedder)
 

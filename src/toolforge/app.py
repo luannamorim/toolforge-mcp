@@ -11,6 +11,7 @@ from toolforge.agent.orchestrator import Orchestrator
 from toolforge.config import Settings
 from toolforge.guardrails.payload import PayloadSizeMiddleware
 from toolforge.http import chat, health, tools
+from toolforge.http._errors import register_rate_limit_handler
 from toolforge.mcp_pool.catalog_cache import CatalogCache, InMemoryCatalogCache, RedisCatalogCache
 from toolforge.mcp_pool.pool import MCPClientPool
 from toolforge.traces.writer import TraceWriter
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
         meter_provider.shutdown()
 
     app = FastAPI(title="ToolForge", version="0.1.0", lifespan=_lifespan)
+    register_rate_limit_handler(app)
     # Must be registered before any middleware that reads the request body.
     app.add_middleware(PayloadSizeMiddleware, max_bytes=settings.max_request_bytes)
     app.include_router(health.router)

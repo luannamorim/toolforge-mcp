@@ -2,11 +2,13 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator
 
+from anthropic import RateLimitError
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import StreamingResponse
 
 from toolforge.guardrails.credentials import scan_credentials
 from toolforge.guardrails.off_domain import _FIXED_DETAIL, classify_off_domain
+from toolforge.http._errors import retry_after as _retry_after
 from toolforge.mcp_pool.catalog_builder import build_catalog
 from toolforge.mcp_pool.pool import MCPClientPool
 from toolforge.models.chat import ChatRequest, ChatResponse
@@ -63,7 +65,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
         request.app.state.cache,
         request.app.state.embedder,
     )
-    queue: asyncio.Queue[dict | None] = asyncio.Queue()
+    queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=32)
 
     async def event_sink(event: dict) -> None:
         await queue.put(event)
@@ -74,6 +76,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                 body, catalog, event_sink=event_sink
             )
             await queue.put({"event": "final.response", "data": response.model_dump(exclude_none=True)})
+        except RateLimitError as exc:
+            await queue.put({"event": "error", "data": {"message": "rate_limited", "retry_after": _retry_after(exc)}})
         except Exception as exc:
             await queue.put({"event": "error", "data": {"message": str(exc)}})
         finally:
