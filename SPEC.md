@@ -196,7 +196,7 @@ External dependencies: Anthropic SDK, MCP Python SDK, FastAPI, Pydantic v2, Redi
 2. **[RESOLVED 2026-05-12] GitHub MCP server choice.** Anthropic reference (`@modelcontextprotocol/server-github`) picked for parity with the filesystem launch pattern and SDK alignment; community fork reconsidered if benchmark gaps surface. Use Anthropic's reference `github-mcp-server` or the community `mcp-server-github`? Need to benchmark tool ergonomics and PR-creation reliability against the golden dataset.
 3. **Slack MCP server availability.** Is there a stable third-party Slack MCP server, or does this project need to ship a thin own-server as scaffolding? If so, mark it clearly in the README as supporting infrastructure, not the deliverable.
 4. **Embedding source** — RESOLVED 2026-05-13: Voyage hosted `voyage-3-lite` via REST; `HashingEmbedder` retained as zero-key fallback. Revisit if rule-4 eval accuracy drops or if Voyage availability becomes a concern.
-5. **Cost-ceiling behavior.** When ceiling is hit mid-task, halt-with-partial (current spec) or one-shot finish with cheaper model? Current spec commits to halt; revisit after first eval pass.
+5. **[RESOLVED 2026-05-14] Cost-ceiling behavior.** v1 halts with partial output. When the per-request cost ceiling is reached mid-task, the orchestrator returns immediately with `halted=True` and `halt_reason="cost_ceiling"`; no further LLM or MCP calls are made. A Haiku-finish fallback (complete the current step at lower cost) is a candidate for v2. Revisit if eval data shows halt-truncation materially degrades task success rate.
 
 ## Differentiation (Portfolio Note)
 
