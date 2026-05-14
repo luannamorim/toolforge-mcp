@@ -98,6 +98,7 @@ def fake_mcp_pool():
     pool = MagicMock()
     pool.connection_status = {"filesystem": True}
     pool.connected_servers = ["filesystem"]
+    pool.down_servers = []
 
     content_block = MagicMock()
     content_block.text = "Hello from the file!"
@@ -116,6 +117,7 @@ def fake_mcp_pool_degraded():
     pool = MagicMock()
     pool.connection_status = {"filesystem": False}
     pool.connected_servers = []
+    pool.down_servers = ["filesystem"]
     return pool
 
 

@@ -8,6 +8,7 @@ from starlette.responses import StreamingResponse
 from toolforge.guardrails.credentials import scan_credentials
 from toolforge.guardrails.off_domain import _FIXED_DETAIL, classify_off_domain
 from toolforge.mcp_pool.catalog_builder import build_catalog
+from toolforge.mcp_pool.pool import MCPClientPool
 from toolforge.models.chat import ChatRequest, ChatResponse
 
 router = APIRouter()
@@ -28,10 +29,21 @@ def _guard_off_domain(message: str) -> None:
         raise HTTPException(status_code=400, detail=_FIXED_DETAIL)
 
 
+def _guard_degraded(pool: MCPClientPool) -> None:
+    down = pool.down_servers
+    if down:
+        raise HTTPException(
+            status_code=503,
+            detail=f"MCP servers unavailable: {', '.join(sorted(down))}",
+        )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, request: Request) -> ChatResponse:
     _guard_credentials(body.message)
     _guard_off_domain(body.message)
+    if not body.dry_run:
+        _guard_degraded(request.app.state.pool)
     catalog = await build_catalog(
         request.app.state.pool,
         request.app.state.cache,
@@ -44,6 +56,8 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
 async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
     _guard_credentials(body.message)
     _guard_off_domain(body.message)
+    if not body.dry_run:
+        _guard_degraded(request.app.state.pool)
     catalog = await build_catalog(
         request.app.state.pool,
         request.app.state.cache,

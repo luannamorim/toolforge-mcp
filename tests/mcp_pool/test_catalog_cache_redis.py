@@ -3,7 +3,7 @@
 import fakeredis.aioredis
 import pytest
 
-from toolforge.mcp_pool.catalog_cache import DEFAULT_TTL, RedisCatalogCache
+from toolforge.mcp_pool.catalog_cache import DEFAULT_TTL, InMemoryCatalogCache, RedisCatalogCache
 from toolforge.models.catalog import ToolCatalog, ToolDescriptor
 
 
@@ -92,3 +92,14 @@ async def test_get_returns_none_after_expiry(fake_redis_cache, sample_catalog):
     await fake_redis_cache._client.expire("mcp:catalog:filesystem:hashing", 0)
     result = await fake_redis_cache.get("filesystem:hashing")
     assert result is None
+
+
+@pytest.mark.unit
+async def test_redis_ping_returns_true(fake_redis_cache):
+    assert await fake_redis_cache.ping() is True
+
+
+@pytest.mark.unit
+async def test_inmemory_ping_returns_true():
+    cache = InMemoryCatalogCache()
+    assert await cache.ping() is True

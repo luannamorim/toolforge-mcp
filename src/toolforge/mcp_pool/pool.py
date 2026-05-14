@@ -30,6 +30,10 @@ class MCPClientPool:
     def connected_servers(self) -> list[str]:
         return [sid for sid, ok in self._connected.items() if ok]
 
+    @property
+    def down_servers(self) -> list[str]:
+        return [sid for sid, ok in self._connected.items() if not ok]
+
     async def connect_all(self) -> None:
         await asyncio.gather(
             *[self._connect(sid, cfg) for sid, cfg in self._configs.items()]

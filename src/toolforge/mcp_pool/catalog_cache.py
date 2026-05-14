@@ -22,6 +22,7 @@ class CatalogCache(Protocol):
     async def invalidate(self, server_id: str) -> None: ...
     async def invalidate_all(self) -> None: ...
     async def close(self) -> None: ...
+    async def ping(self) -> bool: ...
 
 
 class InMemoryCatalogCache:
@@ -51,6 +52,9 @@ class InMemoryCatalogCache:
 
     async def close(self) -> None:
         pass
+
+    async def ping(self) -> bool:
+        return True
 
 
 class RedisCatalogCache:
@@ -97,3 +101,10 @@ class RedisCatalogCache:
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    async def ping(self) -> bool:
+        try:
+            await self._client.ping()
+            return True
+        except Exception:
+            return False
