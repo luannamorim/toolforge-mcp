@@ -34,7 +34,7 @@ Do not substitute these without checking — they are intentional commitments in
 
 ## Architecture (one-paragraph orientation)
 
-Single Python process, three layers. The **HTTP layer** (FastAPI, stateless) accepts `/chat` requests. The **agent core** runs the Anthropic SDK orchestration loop, applies the selection heuristic, enforces the retry policy, emits traces, and supports dry-run. The **MCP client pool** holds one connection per configured server, exposes the merged tool catalog (cached in Redis), and routes returned `tool_use` blocks back to the originating server. Detailed component design is deferred to `docs/ARCHITECTURE.md` (not yet written).
+Single Python process, three layers. The **HTTP layer** (FastAPI, stateless) accepts `/chat` requests. The **agent core** runs the Anthropic SDK orchestration loop, applies the selection heuristic, enforces the retry policy, emits traces, and supports dry-run. The **MCP client pool** holds one connection per configured server, exposes the merged tool catalog (cached in Redis), and routes returned `tool_use` blocks back to the originating server. See `docs/ARCHITECTURE.md` for the full module map, dependency direction, and entry points.
 
 ## Out of scope for v1 (don't volunteer these)
 
