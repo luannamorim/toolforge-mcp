@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("inspect_ai")
+
 from evals.scorers import _load_trace_calls, _score_calls
 
 # ---------------------------------------------------------------------------
