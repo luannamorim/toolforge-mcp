@@ -158,6 +158,7 @@ activemq-data/
 *.p12
 *.pfx
 credentials*
+!src/toolforge/guardrails/credentials.py
 secrets*
 env/
 venv/
