@@ -1,4 +1,17 @@
-# ToolForge
+<div align="center">
+
+<img src=".github/assets/banner.svg" alt="ToolForge" width="380"/>
+
+[![CI](https://github.com/luannamorim/toolforge-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/luannamorim/toolforge-mcp/actions/workflows/ci.yml)
+![Release](https://img.shields.io/badge/release-v1.0.0-blue)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)
+![MCP](https://img.shields.io/badge/MCP-1.6%2B-blueviolet)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Cost](https://img.shields.io/badge/cost%20p95-%3C%20%240.05%2Ftask-success)
+![Focus](https://img.shields.io/badge/focus-MCP%20orchestration-7c3aed)
+
+</div>
 
 A cost-disciplined MCP client agent with a deterministic tool-selection heuristic and
 first-class dry-run. Built on `claude-sonnet-4-6` and the official MCP Python SDK.
