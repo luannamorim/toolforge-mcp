@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src=".github/assets/banner.svg" alt="ToolForge" width="380"/>
+<img src=".github/assets/banner.png" alt="ToolForge" width="500"/>
+
+**Cost-disciplined MCP agent with dry-run.**
 
 [![CI](https://github.com/luannamorim/toolforge-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/luannamorim/toolforge-mcp/actions/workflows/ci.yml)
 ![Release](https://img.shields.io/badge/release-v1.0.0-blue)
@@ -11,10 +13,9 @@
 ![Cost](https://img.shields.io/badge/cost%20p95-%3C%20%240.05%2Ftask-success)
 ![Focus](https://img.shields.io/badge/focus-MCP%20orchestration-7c3aed)
 
-</div>
+A cost-disciplined MCP client agent with deterministic tool selection and first-class dry-run, built on the official MCP Python SDK.
 
-A cost-disciplined MCP client agent with a deterministic tool-selection heuristic and
-first-class dry-run. Built on `claude-sonnet-4-6` and the official MCP Python SDK.
+</div>
 
 ---
 
